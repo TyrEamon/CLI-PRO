@@ -410,8 +410,13 @@ func (s *accountInspectionScheduler) executeInspection(ctx context.Context, sett
 	if err != nil {
 		return nil, accountInspectionSummary{}, err
 	}
+	liveAuths := make([]*coreauth.Auth, 0, len(auths))
 	accounts := make([]accountInspectionAccount, 0, len(auths))
 	for _, auth := range auths {
+		if !s.authFileExists(auth) {
+			continue
+		}
+		liveAuths = append(liveAuths, auth)
 		account := accountFromAuth(auth)
 		if shouldInspectAccount(account, settings.TargetType) {
 			accounts = append(accounts, account)
@@ -454,7 +459,7 @@ func (s *accountInspectionScheduler) executeInspection(ctx context.Context, sett
 	wg.Wait()
 
 	s.applyAutomaticActions(ctx, results, settings, appendLog)
-	return results, summarizeAccountInspection(len(auths), probeSetCount, accounts, results), nil
+	return results, summarizeAccountInspection(len(liveAuths), probeSetCount, accounts, results), nil
 }
 
 func (s *accountInspectionScheduler) auths() ([]*coreauth.Auth, error) {
@@ -468,6 +473,27 @@ func (s *accountInspectionScheduler) auths() ([]*coreauth.Auth, error) {
 		return nil, fmt.Errorf("core auth manager unavailable")
 	}
 	return manager.List(), nil
+}
+
+func (s *accountInspectionScheduler) authFileExists(auth *coreauth.Auth) bool {
+	if auth == nil {
+		return false
+	}
+	if isRuntimeOnlyAuth(auth) {
+		return true
+	}
+	path := strings.TrimSpace(authAttribute(auth, "path"))
+	if path == "" && s.h != nil && s.h.cfg != nil {
+		fileName := strings.TrimSpace(auth.FileName)
+		if fileName != "" {
+			path = filepath.Join(s.h.cfg.AuthDir, filepath.Base(fileName))
+		}
+	}
+	if path == "" {
+		return true
+	}
+	_, err := os.Stat(path)
+	return err == nil || !os.IsNotExist(err)
 }
 
 func accountFromAuth(auth *coreauth.Auth) accountInspectionAccount {
@@ -942,6 +968,7 @@ func (s *accountInspectionScheduler) applyAutomaticActions(ctx context.Context, 
 	if workers <= 0 {
 		workers = 1
 	}
+	deletedFiles := make(map[string]struct{})
 	cursor := 0
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -960,6 +987,16 @@ func (s *accountInspectionScheduler) applyAutomaticActions(ctx context.Context, 
 				action := autoActionForResult(results[index], settings)
 				if action == "" {
 					continue
+				}
+				if action == "delete" {
+					mu.Lock()
+					if _, ok := deletedFiles[results[index].FileName]; ok {
+						results[index].ExecuteError = "auth file already deleted in this inspection run"
+						mu.Unlock()
+						continue
+					}
+					deletedFiles[results[index].FileName] = struct{}{}
+					mu.Unlock()
 				}
 				err := s.executeAction(ctx, results[index], action)
 				mu.Lock()
