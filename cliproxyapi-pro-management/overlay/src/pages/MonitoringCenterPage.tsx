@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { Button } from '@/components/ui/Button';
@@ -27,7 +27,8 @@ import {
 import { useUsageData } from '@/features/monitoring/hooks/useUsageData';
 import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
 import { useInterval } from '@/hooks/useInterval';
-import { useAuthStore, useConfigStore, useQuotaStore } from '@/stores';
+import { apiClient } from '@/services/api/client';
+import { useAuthStore, useConfigStore, useNotificationStore, useQuotaStore } from '@/stores';
 import type { AuthFileItem } from '@/types';
 import { maskSensitiveText } from '@/utils/format';
 import { getStatusFromError } from '@/utils/quota';
@@ -104,6 +105,13 @@ type RealtimeLogRow = MonitoringEventRow & {
   successRate: number;
   streamKey: string;
   recentPattern: boolean[];
+};
+
+type UsageImportResult = {
+  added?: number;
+  skipped?: number;
+  total?: number;
+  failed?: number;
 };
 
 
@@ -676,6 +684,7 @@ export function MonitoringCenterPage() {
   const { t, i18n } = useTranslation();
   const config = useConfigStore((state) => state.config);
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
+  const showNotification = useNotificationStore((state) => state.showNotification);
   const quotaStore = useQuotaStore((state) => state);
   const [timeRange, setTimeRange] = useState<MonitoringTimeRange>('today');
   const [searchInput, setSearchInput] = useState('');
@@ -690,6 +699,8 @@ export function MonitoringCenterPage() {
   const [isPriceModalOpen, setIsPriceModalOpen] = useState(false);
   const [priceModel, setPriceModel] = useState('');
   const [priceDraft, setPriceDraft] = useState<PriceDraft>(() => createPriceDraft());
+  const [isImportingUsage, setIsImportingUsage] = useState(false);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const [accountQuotaStates, setAccountQuotaStates] = useState<Record<string, AccountQuotaState>>({});
   const [accountSort, setAccountSort] = useState<AccountSortState>(DEFAULT_ACCOUNT_SORT);
   const focusSnapshotRef = useRef<FocusSnapshot | null>(null);
@@ -724,6 +735,74 @@ export function MonitoringCenterPage() {
   const refreshAll = useCallback(async () => {
     await Promise.all([loadUsage(), refreshMeta(false)]);
   }, [loadUsage, refreshMeta]);
+
+  const handleExportUsage = useCallback(async () => {
+    if (connectionStatus !== 'connected') {
+      showNotification(t('notification.connection_required'), 'warning');
+      return;
+    }
+
+    try {
+      const response = await apiClient.getRaw('/usage/export', { responseType: 'blob' });
+      const blob = response.data instanceof Blob ? response.data : new Blob([response.data], { type: 'application/x-ndjson' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      link.href = url;
+      link.download = `usage-export-${timestamp}.jsonl`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      showNotification(t('usage_stats.export_success'), 'success');
+    } catch (error) {
+      showNotification(error instanceof Error ? error.message : String(error || t('common.unknown_error')), 'error');
+    }
+  }, [connectionStatus, showNotification, t]);
+
+  const handleImportUsageClick = useCallback(() => {
+    if (connectionStatus !== 'connected') {
+      showNotification(t('notification.connection_required'), 'warning');
+      return;
+    }
+    importInputRef.current?.click();
+  }, [connectionStatus, showNotification, t]);
+
+  const handleImportUsageFile = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      event.target.value = '';
+      if (!file) return;
+
+      setIsImportingUsage(true);
+      try {
+        const content = await file.text();
+        if (!content.trim()) {
+          showNotification(t('usage_stats.import_invalid'), 'error');
+          return;
+        }
+
+        const result = await apiClient.post<UsageImportResult>('/usage/import', content, {
+          headers: { 'Content-Type': 'application/x-ndjson' },
+        });
+        showNotification(
+          t('usage_stats.import_success', {
+            added: result.added ?? 0,
+            skipped: result.skipped ?? 0,
+            total: result.total ?? 0,
+            failed: result.failed ?? 0,
+          }),
+          (result.failed ?? 0) > 0 ? 'warning' : 'success'
+        );
+        await refreshAll();
+      } catch (error) {
+        showNotification(error instanceof Error ? error.message : String(error || t('common.unknown_error')), 'error');
+      } finally {
+        setIsImportingUsage(false);
+      }
+    },
+    [refreshAll, showNotification, t]
+  );
 
   useHeaderRefresh(refreshAll);
   useInterval(
@@ -1233,13 +1312,37 @@ export function MonitoringCenterPage() {
           <span className={styles.eyebrow}>{t('monitoring.realtime_console_eyebrow')}</span>
           <div className={styles.titleRow}>
             <h1 className={styles.title}>{t('monitoring.title')}</h1>
-            <button
-              type="button"
-              className={`${styles.quickLinkButton} ${styles.mastheadActionButton}`}
-              onClick={() => setIsPriceModalOpen(true)}
-            >
-              {t('usage_stats.model_price_settings')}
-            </button>
+            <div className={styles.titleActions}>
+              <button
+                type="button"
+                className={`${styles.quickLinkButton} ${styles.mastheadActionButton}`}
+                onClick={() => void handleExportUsage()}
+              >
+                {t('usage_stats.export')}
+              </button>
+              <button
+                type="button"
+                className={`${styles.quickLinkButton} ${styles.mastheadActionButton}`}
+                onClick={handleImportUsageClick}
+                disabled={isImportingUsage}
+              >
+                {isImportingUsage ? t('common.loading') : t('usage_stats.import')}
+              </button>
+              <button
+                type="button"
+                className={`${styles.quickLinkButton} ${styles.mastheadActionButton}`}
+                onClick={() => setIsPriceModalOpen(true)}
+              >
+                {t('usage_stats.model_price_settings')}
+              </button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".jsonl,.ndjson,.json,application/x-ndjson,application/json"
+                className={styles.hiddenFileInput}
+                onChange={handleImportUsageFile}
+              />
+            </div>
           </div>
           <p className={styles.subtitle}>{t('monitoring.console_subtitle')}</p>
         </div>

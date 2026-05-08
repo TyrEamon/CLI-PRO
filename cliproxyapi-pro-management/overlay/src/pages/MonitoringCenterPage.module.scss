@@ -108,6 +108,18 @@
   letter-spacing: -0.045em;
 }
 
+.titleActions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.hiddenFileInput {
+  display: none;
+}
+
 .subtitle {
   margin: 0;
   max-width: 760px;
