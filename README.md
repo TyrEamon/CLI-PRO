@@ -251,6 +251,22 @@ This project follows a minimal customization approach:
 - Reapply the customization layer when upstream updates.
 - Keep documentation, scripts, and workflows verifiable and repeatable.
 
+## Copyright and acknowledgements
+
+This repository is a customization layer and release workflow for upstream projects. It does not claim ownership of upstream code, names, or assets. Upstream code and artifacts retain their original copyright notices and licenses.
+
+- `router-for-me/CLIProxyAPI` is licensed under the MIT License. Its upstream `LICENSE` currently states:
+  - Copyright (c) 2025-2005.9 Luis Pater
+  - Copyright (c) 2025.9-present Router-For.ME
+- `router-for-me/Cli-Proxy-API-Management-Center` is licensed under the MIT License. Its upstream `LICENSE` currently states:
+  - Copyright (c) 2026 Router-For.ME
+
+Special thanks to:
+
+- [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) — the upstream backend project this core customization layer builds on.
+- [router-for-me/Cli-Proxy-API-Management-Center](https://github.com/router-for-me/Cli-Proxy-API-Management-Center) — the upstream management UI this frontend customization layer builds on.
+- [seakee/CPA-Manager](https://github.com/seakee/CPA-Manager) — an important CLIProxyAPI management and monitoring project that inspired the Pro usage, monitoring, and account-inspection direction.
+
 ## Documentation
 
 - Core English README: `cliproxyapi-pro-core/README.md`

@@ -251,6 +251,22 @@ KOMARI_SECRET
 - upstream 更新时重新应用定制层。
 - 文档、脚本和 workflow 尽量保持可验证、可重复。
 
+## 版权与鸣谢
+
+本仓库是围绕 upstream 项目的定制层和发布流程，不声明拥有 upstream 代码、名称或资源的版权。upstream 代码和产物仍保留其原始版权声明和许可证。
+
+- `router-for-me/CLIProxyAPI` 使用 MIT License。其 upstream `LICENSE` 当前声明：
+  - Copyright (c) 2025-2005.9 Luis Pater
+  - Copyright (c) 2025.9-present Router-For.ME
+- `router-for-me/Cli-Proxy-API-Management-Center` 使用 MIT License。其 upstream `LICENSE` 当前声明：
+  - Copyright (c) 2026 Router-For.ME
+
+特别鸣谢：
+
+- [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) — 本项目 core 定制层所基于的 upstream 后端项目。
+- [router-for-me/Cli-Proxy-API-Management-Center](https://github.com/router-for-me/Cli-Proxy-API-Management-Center) — 本项目 management 定制层所基于的 upstream 管理 UI 项目。
+- [seakee/CPA-Manager](https://github.com/seakee/CPA-Manager) — 重要的 CLIProxyAPI 管理与监控项目，对 Pro usage、monitoring 和账号巡检方向提供了参考。
+
 ## 参考文档
 
 - Core 中文文档：`cliproxyapi-pro-core/README_CN.md`
