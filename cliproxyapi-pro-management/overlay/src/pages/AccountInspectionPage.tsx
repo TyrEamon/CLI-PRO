@@ -177,6 +177,12 @@ const getAuthFileZipPath = (entry: AuthFileExportEntry, usedPaths: Set<string>) 
   return path;
 };
 
+const toArrayBuffer = (data: Uint8Array) => {
+  const arrayBuffer = new ArrayBuffer(data.byteLength);
+  new Uint8Array(arrayBuffer).set(data);
+  return arrayBuffer;
+};
+
 const compressZipData = async (data: Uint8Array): Promise<{ data: Uint8Array; method: 0 | 8 }> => {
   const CompressionStreamCtor = (globalThis as typeof globalThis & {
     CompressionStream?: new (format: 'deflate-raw') => TransformStream<Uint8Array, Uint8Array>;
@@ -187,7 +193,7 @@ const compressZipData = async (data: Uint8Array): Promise<{ data: Uint8Array; me
   }
 
   try {
-    const stream = new Blob([data]).stream().pipeThrough(new CompressionStreamCtor('deflate-raw'));
+    const stream = new Blob([toArrayBuffer(data)]).stream().pipeThrough(new CompressionStreamCtor('deflate-raw'));
     return { data: new Uint8Array(await new Response(stream).arrayBuffer()), method: 8 };
   } catch {
     return { data, method: 0 };
@@ -265,7 +271,10 @@ const buildZipArchive = async (entries: AuthFileExportEntry[]) => {
   writeUint32(endView, 12, centralDirectory.length);
   writeUint32(endView, 16, offset);
 
-  return new Blob([...parts, centralDirectory, endOfCentralDirectory], { type: 'application/zip' });
+  return new Blob(
+    [...parts, centralDirectory, endOfCentralDirectory].map(toArrayBuffer),
+    { type: 'application/zip' }
+  );
 };
 
 const downloadBlobFile = (fileName: string, blob: Blob) => {
