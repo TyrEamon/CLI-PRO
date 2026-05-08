@@ -143,6 +143,12 @@ https://github.com/ssfun/CLIProxyAPI-Pro
 
 ## Docker 构建
 
+已发布镜像：
+
+```bash
+docker pull sfun/cliproxyapi-pro:latest
+```
+
 构建 upstream 最新 release：
 
 ```bash
@@ -231,7 +237,7 @@ Workflow：
 
 ### 多实例 usage 备份
 
-推荐使用一个 JSON secret：
+workflow 使用一个可选 JSON secret 配置全部 WebDAV 备份目标：
 
 ```text
 CLIPROXY_USAGE_BACKUP_TARGETS
@@ -258,19 +264,11 @@ CLIPROXY_USAGE_BACKUP_TARGETS
 usage-export-YYYYMMDD_HHMMSS.jsonl
 ```
 
-workflow 会在每个 WebDAV 目录内保留最近 7 个备份，并同时清理 `.jsonl` 和历史 `.json` 文件。
-
-如果未配置 `CLIPROXY_USAGE_BACKUP_TARGETS`，仍支持旧的单实例 secrets：
-
-- `CLIPROXY_API_URL`
-- `CLIPROXY_MANAGEMENT_PASSWORD`
-- `WEBDAV_URL`
-- `WEBDAV_USERNAME`
-- `WEBDAV_PASSWORD`
+workflow 会在每个 WebDAV 目录内保留最近 7 个备份，并同时清理 `.jsonl` 和历史 `.json` 文件。如果 secret 未配置、格式无效或某个目标失败，workflow 会记录警告并继续执行。
 
 ### 多 Render 部署 hook
 
-推荐使用一个 JSON secret：
+workflow 使用一个可选 JSON secret 配置全部 Render deploy hooks：
 
 ```text
 CLIPROXY_RENDER_DEPLOY_HOOKS
@@ -287,11 +285,7 @@ CLIPROXY_RENDER_DEPLOY_HOOKS
 ]
 ```
 
-`url` 也可作为 `hook_url` 的别名。
-
-如果未配置 `CLIPROXY_RENDER_DEPLOY_HOOKS`，仍支持旧的单目标 secret：
-
-- `CLIPROXY_RENDER_DEPLOY_HOOK`
+`url` 也可作为 `hook_url` 的别名。如果 secret 未配置、格式无效或某个目标失败，workflow 会记录警告并继续执行。
 
 ### Telegram 通知 secrets
 

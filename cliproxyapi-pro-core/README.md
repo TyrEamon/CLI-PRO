@@ -143,6 +143,12 @@ It then starts `CLIProxyAPI` and optionally restores the latest usage backup fro
 
 ## Docker build
 
+Published image:
+
+```bash
+docker pull sfun/cliproxyapi-pro:latest
+```
+
 Build latest upstream release:
 
 ```bash
@@ -231,7 +237,7 @@ The workflow:
 
 ### Multi-instance usage backup
 
-Preferred configuration uses one JSON secret:
+The workflow uses one optional JSON secret for all WebDAV backup targets:
 
 ```text
 CLIPROXY_USAGE_BACKUP_TARGETS
@@ -258,19 +264,11 @@ Each target is exported from its own CPA API and uploaded to its own WebDAV dire
 usage-export-YYYYMMDD_HHMMSS.jsonl
 ```
 
-The workflow keeps the latest 7 backups per WebDAV directory and cleans both `.jsonl` and legacy `.json` files.
-
-Legacy single-instance fallback is still supported when `CLIPROXY_USAGE_BACKUP_TARGETS` is not set:
-
-- `CLIPROXY_API_URL`
-- `CLIPROXY_MANAGEMENT_PASSWORD`
-- `WEBDAV_URL`
-- `WEBDAV_USERNAME`
-- `WEBDAV_PASSWORD`
+The workflow keeps the latest 7 backups per WebDAV directory and cleans both `.jsonl` and legacy `.json` files. If the secret is missing, invalid, or a target fails, the workflow logs a warning and continues.
 
 ### Multi-target Render deploy hooks
 
-Preferred configuration uses one JSON secret:
+The workflow uses one optional JSON secret for all Render deploy hooks:
 
 ```text
 CLIPROXY_RENDER_DEPLOY_HOOKS
@@ -287,11 +285,7 @@ Example:
 ]
 ```
 
-`url` is also accepted as an alias for `hook_url`.
-
-Legacy single-target fallback is still supported when `CLIPROXY_RENDER_DEPLOY_HOOKS` is not set:
-
-- `CLIPROXY_RENDER_DEPLOY_HOOK`
+`url` is also accepted as an alias for `hook_url`. If the secret is missing, invalid, or a target fails, the workflow logs a warning and continues.
 
 ### Telegram notification secrets
 
