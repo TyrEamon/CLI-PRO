@@ -70,7 +70,7 @@ Adds a top-level account inspection route:
 /account-inspection
 ```
 
-The page supports both frontend-run inspections and backend scheduled inspections. It can inspect:
+The page controls and displays backend-run inspections. The browser does not execute probes directly. The backend can inspect:
 
 - Antigravity
 - Claude
@@ -82,20 +82,24 @@ Features include:
 
 - target provider selection
 - configurable workers, delete workers, timeout, retries, used-percent threshold, and sample size
-- run, pause, resume, and stop controls for frontend sessions
-- backend `Run now` button
+- backend run, pause, resume, and stop controls
 - backend schedule enablement and interval configuration
-- progress, logs, summary cards, and result table
+- progress, logs, summary cards, and result table from backend status polling
 - suggested actions: keep, delete, disable, enable
-- manual execution for a single planned action or all planned actions
-- optional auto-execution policies for quota-limit disable, quota-recovery enable, and account-error disable/delete
+- manual execution for a single planned action or all planned actions through the backend
+- optional backend auto-execution policies for quota-limit disable, quota-recovery enable, and account-error disable/delete
 - quota snapshot refresh from backend inspection results
 
-Backend schedule/status routes expected by the page:
+Backend schedule/status/control routes expected by the page:
 
 - `GET /account-inspection/schedule`
+- `GET /account-inspection/status`
 - `PUT /account-inspection/schedule`
 - `POST /account-inspection/run`
+- `POST /account-inspection/pause`
+- `POST /account-inspection/resume`
+- `POST /account-inspection/stop`
+- `POST /account-inspection/actions`
 
 Under the full management API prefix these are exposed by the backend as `/v0/management/account-inspection/...`.
 
@@ -202,6 +206,11 @@ These frontend customizations expect the customized `cliproxyapi-pro-core` backe
 - `/v0/management/usage/quota-cache`
 - `/v0/management/usage/model-prices`
 - `/v0/management/account-inspection/schedule`
+- `/v0/management/account-inspection/status`
 - `/v0/management/account-inspection/run`
+- `/v0/management/account-inspection/pause`
+- `/v0/management/account-inspection/resume`
+- `/v0/management/account-inspection/stop`
+- `/v0/management/account-inspection/actions`
 
-Without the customized backend, monitoring, SQLite-backed persistence, model prices, and backend scheduled inspection will show errors or empty data.
+Without the customized backend, monitoring, SQLite-backed persistence, model prices, and backend account inspection will show errors or empty data.
