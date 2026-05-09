@@ -40,9 +40,11 @@ CLIProxyAPI Pro 是对两个 upstream 项目的最小化定制层集合：
 - 内嵌 SQLite usage service。
 - 暴露 `/v0/management/usage` 系列 API。
 - 支持 usage JSONL/NDJSON 导入导出。
+- 暴露 usage status 和 dead-letter 可观测性接口。
+- dead-letter 导出与普通 usage 导出分离。
 - 支持 WebDAV usage 备份恢复。
 - 支持 SQLite-backed quota cache。
-- 支持模型价格持久化。
+- 支持模型价格持久化和 LiteLLM 模型价格同步。
 - 支持后端账号巡检调度器和执行器，巡检探测前可刷新 token。
 - 支持 Komari agent 可选启动。
 - 将 `/` 跳转到 `/management.html`。
@@ -59,13 +61,13 @@ CLIProxyAPI Pro 是对两个 upstream 项目的最小化定制层集合：
 
 主要能力：
 
-- 新增 `/monitoring` 请求监控页面。
+- 新增 `/monitoring` 请求监控页面，支持自定义时间范围、排序、分页和失败分布。
 - 新增 `/account-inspection` 账号巡检页面。
 - 请求量、成功率、延迟、token 和成本统计。
-- 模型价格 SQLite 持久化。
-- quota cache SQLite 持久化。
+- 模型价格 SQLite 持久化，并可从 LiteLLM 同步价格。
+- quota cache SQLite 持久化，并使用 stats 检查平衡新鲜度和请求量。
 - 配额卡片缓存时间显示和单卡刷新。
-- 对接后端账号巡检，负责运行控制、状态轮询、结果展示和操作确认。
+- 对接后端账号巡检，负责运行控制、WebSocket/WSS 日志、结果展示和操作确认。
 - 账号禁用、启用、删除建议与执行。
 - 多语言文案补丁。
 - 最小化 overlay + patch 应用流程。
@@ -85,8 +87,12 @@ CLIProxyAPI Pro 是对两个 upstream 项目的最小化定制层集合：
 /v0/management/usage
 /v0/management/usage/export
 /v0/management/usage/import
+/v0/management/usage/status
+/v0/management/usage/dead-letters
+/v0/management/usage/dead-letters/export
 /v0/management/usage/quota-cache
 /v0/management/usage/model-prices
+/v0/management/usage/model-prices/sync
 /v0/management/account-inspection/schedule
 /v0/management/account-inspection/status
 /v0/management/account-inspection/logs
@@ -176,8 +182,8 @@ docker build -t cliproxyapi-pro ./cliproxyapi-pro-core
 
 ```bash
 docker build \
-  --build-arg CLIPROXY_VERSION=v6.10.1 \
-  -t cliproxyapi-pro:v6.10.1 \
+  --build-arg CLIPROXY_VERSION=v7.0.0 \
+  -t cliproxyapi-pro:v7.0.0 \
   ./cliproxyapi-pro-core
 ```
 

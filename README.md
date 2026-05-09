@@ -40,9 +40,11 @@ Main capabilities:
 - Embeds a SQLite usage service.
 - Exposes `/v0/management/usage` API routes.
 - Supports usage JSONL/NDJSON import and export.
+- Exposes usage status and dead-letter observability routes.
+- Keeps dead-letter export separate from normal usage export.
 - Supports WebDAV usage backup restore.
 - Supports SQLite-backed quota cache.
-- Supports model price persistence.
+- Supports model price persistence and LiteLLM model-price sync.
 - Adds a backend account-inspection scheduler and executor with token refresh before probing.
 - Optionally starts the Komari agent.
 - Redirects `/` to `/management.html`.
@@ -59,13 +61,13 @@ Frontend management-center customization layer for generating the single-file `m
 
 Main capabilities:
 
-- Adds the `/monitoring` request monitoring page.
+- Adds the `/monitoring` request monitoring page with custom ranges, sorting, pagination, and failure breakdowns.
 - Adds the `/account-inspection` account inspection page.
 - Shows request count, success rate, latency, token, and cost metrics.
-- Persists model prices through SQLite.
-- Persists quota cache through SQLite.
+- Persists model prices through SQLite and can sync prices from LiteLLM.
+- Persists quota cache through SQLite with stats-based freshness checks.
 - Shows quota-card cache timestamps and supports single-card refresh.
-- Integrates with backend account inspection for run control, polling, results, and actions.
+- Integrates with backend account inspection for run control, WebSocket/WSS logs, results, and actions.
 - Supports suggested account disable, enable, and delete actions.
 - Adds locale patches.
 - Uses a minimal overlay + patch application flow.
@@ -85,8 +87,12 @@ Core dependent routes:
 /v0/management/usage
 /v0/management/usage/export
 /v0/management/usage/import
+/v0/management/usage/status
+/v0/management/usage/dead-letters
+/v0/management/usage/dead-letters/export
 /v0/management/usage/quota-cache
 /v0/management/usage/model-prices
+/v0/management/usage/model-prices/sync
 /v0/management/account-inspection/schedule
 /v0/management/account-inspection/status
 /v0/management/account-inspection/logs
@@ -176,8 +182,8 @@ Build a specific upstream release:
 
 ```bash
 docker build \
-  --build-arg CLIPROXY_VERSION=v6.10.1 \
-  -t cliproxyapi-pro:v6.10.1 \
+  --build-arg CLIPROXY_VERSION=v7.0.0 \
+  -t cliproxyapi-pro:v7.0.0 \
   ./cliproxyapi-pro-core
 ```
 
