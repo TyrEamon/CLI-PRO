@@ -1,164 +1,155 @@
-# CLIProxyAPI Pro
+# CLIProxyAPI Pro Core
 
-CLIProxyAPI Pro is a minimal customization-layer collection for two upstream projects:
+Customized Docker build layer for upstream `router-for-me/CLIProxyAPI`.
 
-- `cliproxyapi-pro-core/` — backend Docker build customization for `router-for-me/CLIProxyAPI`.
-- `cliproxyapi-pro-management/` — frontend management-center customization for `router-for-me/Cli-Proxy-API-Management-Center`.
+This directory does not maintain a full fork of upstream. During Docker build it downloads an upstream release, copies in the local `embeddedusage/` package, applies the patch script in `patches/`, and builds a multi-arch image for the Pro deployment.
 
-This project does not maintain a full fork of either upstream project. Instead, it keeps repeatable patches, overlays, and build workflows. Release workflows fetch the latest upstream release, apply the Pro customization layer, and publish the resulting artifacts.
+## What this customization adds
 
-## Repository layout
+### Embedded usage service
+
+`embeddedusage/` is copied into upstream as:
 
 ```text
-.
-├── cliproxyapi-pro-core/
-│   ├── Dockerfile
-│   ├── entrypoint.sh
-│   ├── embeddedusage/
-│   └── patches/
-│
-├── cliproxyapi-pro-management/
-│   ├── apply.sh
-│   ├── apply_customizations.py
-│   ├── monitoring-locales.json
-│   └── overlay/
-│
-└── .github/workflows/
-    ├── release-core.yml
-    └── release-mangement.yml
+internal/embeddedusage
 ```
 
-## Subprojects
-
-### cliproxyapi-pro-core
-
-Backend customization layer for building the Pro Docker image.
-
-Main capabilities:
-
-- Builds a multi-arch Docker image from an upstream CLIProxyAPI release.
-- Embeds a SQLite usage service.
-- Exposes `/v0/management/usage` API routes.
-- Supports usage JSONL/NDJSON import and export.
-- Supports WebDAV usage backup restore.
-- Supports SQLite-backed quota cache.
-- Supports model price persistence.
-- Adds a backend account-inspection scheduler and executor with token refresh before probing.
-- Optionally starts the Komari agent.
-- Redirects `/` to `/management.html`.
-- Enhances the `/healthz` response.
-
-See:
-
-- `cliproxyapi-pro-core/README.md`
-- `cliproxyapi-pro-core/README_CN.md`
-
-### cliproxyapi-pro-management
-
-Frontend management-center customization layer for generating the single-file `management.html` artifact.
-
-Main capabilities:
-
-- Adds the `/monitoring` request monitoring page.
-- Adds the `/account-inspection` account inspection page.
-- Shows request count, success rate, latency, token, and cost metrics.
-- Persists model prices through SQLite.
-- Persists quota cache through SQLite.
-- Shows quota-card cache timestamps and supports single-card refresh.
-- Integrates with backend account inspection for run control, polling, results, and actions.
-- Supports suggested account disable, enable, and delete actions.
-- Adds locale patches.
-- Uses a minimal overlay + patch application flow.
-
-See:
-
-- `cliproxyapi-pro-management/README.md`
-- `cliproxyapi-pro-management/README_CN.md`
-
-## Backend and frontend relationship
-
-Some `cliproxyapi-pro-management` features depend on enhanced management APIs provided by `cliproxyapi-pro-core`.
-
-Core dependent routes:
+The patch layer starts the service with the main API process, enables upstream usage statistics, and exposes the service under the management API prefix:
 
 ```text
 /v0/management/usage
-/v0/management/usage/export
-/v0/management/usage/import
-/v0/management/usage/quota-cache
-/v0/management/usage/model-prices
-/v0/management/account-inspection/schedule
-/v0/management/account-inspection/status
-/v0/management/account-inspection/logs
-/v0/management/account-inspection/run
-/v0/management/account-inspection/pause
-/v0/management/account-inspection/resume
-/v0/management/account-inspection/stop
-/v0/management/account-inspection/actions
 ```
 
-Account inspection is executed by the backend only. The management UI configures schedules, starts or controls runs, polls status/progress/results, streams logs and live status over WebSocket/WSS, and confirms manual actions.
-
-During backend inspection, eligible auth records are refreshed before quota/account probing when they are already in their normal refresh window. The inspection refresh path skips API-key accounts, accounts not yet due for refresh, and accounts still blocked by `NextRefreshAfter`; disabled accounts are allowed to refresh. If refresh succeeds, probing uses the refreshed auth. If refresh fails, the account is kept and probing is skipped for that account.
-
-If the management UI is used with the unmodified upstream backend, request monitoring, SQLite persistence, model prices, and backend account inspection will show errors or empty data.
-
-## Release workflows
-
-### Core image release
-
-Workflow:
+By default it stores SQLite data at:
 
 ```text
-.github/workflows/release-core.yml
+/CLIProxyAPI/usage/usage.sqlite
 ```
 
-Overview:
+The image declares `/CLIProxyAPI/usage` as a Docker volume so usage data and account-inspection schedule state can survive container replacement.
 
-1. Checks the latest upstream `router-for-me/CLIProxyAPI` release.
-2. Compares it with the current Docker Hub image tag.
-3. Builds and pushes the Docker image when upstream is newer.
-4. Backs up usage statistics to WebDAV.
-5. Triggers Render deployments.
-6. Sends a Telegram notification.
-7. Deletes old workflow runs.
+### Usage API
 
-Image tags follow upstream release tags.
+The embedded service exposes these management routes:
 
-### Management release
+- `GET /v0/management/usage` — aggregated usage payload for the management UI.
+- `GET /v0/management/usage/export` — JSONL/NDJSON export.
+- `POST /v0/management/usage/import` — JSONL/NDJSON import.
+- `GET /v0/management/usage/status` — service status and record counts.
+- `GET /v0/management/usage/quota-cache` — read quota cache entries or stats.
+- `PUT /v0/management/usage/quota-cache` — write a quota cache entry.
+- `DELETE /v0/management/usage/quota-cache` — delete quota cache entries.
+- `GET /v0/management/usage/model-prices` — read model price settings.
+- `PUT /v0/management/usage/model-prices` — write model price settings.
 
-Workflow:
+### JSONL usage backup and restore
+
+`/usage/export` returns `application/x-ndjson`, one JSON object per line.
+
+The export contains usage events and may also include metadata records:
+
+- `model_prices` — persisted model price settings used by the management UI cost view.
+- `account_inspection_schedule` — persisted backend account-inspection schedule.
+
+`/usage/import` accepts the same JSONL format. It imports usage events, restores model prices, and restores the account-inspection schedule when that metadata record is present. Older event-only JSONL files remain compatible.
+
+Example import response fields:
+
+```json
+{
+  "added": 100,
+  "skipped": 5,
+  "total": 105,
+  "failed": 0,
+  "modelPrices": 12,
+  "modelPriceRecords": 1,
+  "accountInspectionSchedule": true,
+  "accountInspectionScheduleRecords": 1
+}
+```
+
+### SQLite-backed quota cache
+
+The embedded service stores quota snapshots in SQLite for these providers:
+
+- Antigravity
+- Claude
+- Codex
+- Gemini CLI
+- Kimi
+
+The management UI reads and writes this cache through `/usage/quota-cache`, so quota cards can be restored after page refreshes, browser changes, and backend restarts.
+
+### Backend account inspection scheduler
+
+The patch layer adds backend account-inspection routes under the management API:
+
+- `GET /v0/management/account-inspection/schedule`
+- `GET /v0/management/account-inspection/status`
+- `GET /v0/management/account-inspection/logs` (WebSocket/WSS log and status stream)
+- `PUT /v0/management/account-inspection/schedule`
+- `POST /v0/management/account-inspection/run`
+- `POST /v0/management/account-inspection/pause`
+- `POST /v0/management/account-inspection/resume`
+- `POST /v0/management/account-inspection/stop`
+- `POST /v0/management/account-inspection/actions`
+
+The scheduler can inspect accounts for:
+
+- Antigravity
+- Claude
+- Codex
+- Gemini CLI
+- Kimi
+
+It supports provider filtering, worker limits, retry/timeout settings, sampling, usage-threshold decisions, progress/status/log/result snapshots, pause/resume/stop controls, manual actions, and optional automatic actions for quota exhaustion, quota recovery, and account errors.
+
+Before probing an account, the scheduler can refresh its auth record when it is already in the normal upstream refresh window. This inspection refresh path reuses upstream provider refresh logic and persistence, allows disabled accounts, skips API-key accounts, skips accounts not yet due, and respects `NextRefreshAfter`. If refresh succeeds, probing uses the refreshed auth; if refresh fails, the scheduler keeps the account and skips probing it for that run.
+
+The schedule file defaults to:
 
 ```text
-.github/workflows/release-mangement.yml
+/CLIProxyAPI/usage/account-inspection-schedule.json
 ```
 
-Overview:
+Override it with `ACCOUNT_INSPECTION_SCHEDULE_PATH` if needed.
 
-1. Checks the latest upstream `router-for-me/Cli-Proxy-API-Management-Center` release.
-2. Compares it with this repository's latest release, normalizing the `-pro` suffix.
-3. Checks out the latest upstream release tag when upstream is newer.
-4. Applies the `cliproxyapi-pro-management` customization layer.
-5. Runs `npm ci` and `npm run build`.
-6. Renames `dist/index.html` to `management.html`.
-7. Creates a GitHub Release and uploads `management.html`.
-8. Deletes old workflow runs.
+### Root redirect and health response
 
-Management release tag format:
+The patch layer also changes upstream API behavior:
+
+- `/` redirects to `/management.html`.
+- `/healthz` returns a richer CLIProxyAPI status payload while preserving `HEAD /healthz`.
+
+### Management panel defaults
+
+The patch layer changes upstream's default remote management panel repository to:
 
 ```text
-<upstream-tag>-pro
+https://github.com/ssfun/CLIProxyAPI-Pro
 ```
 
-Example:
+This affects the built-in default config, `config.example.yaml`, and the management asset updater's default latest-release API URL.
 
-```text
-v1.7.41-pro
-```
+### Runtime helper process
 
-## Local build
+`entrypoint.sh` can start the bundled Komari agent before the main API process when both variables are configured:
 
-### Build the core Docker image
+- `KOMARI_SERVER`
+- `KOMARI_SECRET`
+
+It then starts `CLIProxyAPI` and optionally restores the latest usage backup from WebDAV.
+
+## Repository layout
+
+- `Dockerfile` — downloads upstream CLIProxyAPI, applies this customization layer, and builds the final image.
+- `entrypoint.sh` — starts Komari, starts the main API, and restores WebDAV usage backups.
+- `embeddedusage/` — embedded SQLite usage service and management routes.
+- `patches/apply_upstream_patches.py` — patches upstream source during Docker build.
+- `patches/account_inspection_scheduler.go` — backend account-inspection scheduler injected into upstream management handlers.
+- `.github/workflows/release-core.yml` — image publish, usage backup, Render deployment trigger, Telegram notification, and run cleanup.
+
+## Docker build
 
 Published image:
 
@@ -166,7 +157,7 @@ Published image:
 docker pull sfun/cliproxyapi-pro:latest
 ```
 
-Build locally:
+Build latest upstream release:
 
 ```bash
 docker build -t cliproxyapi-pro ./cliproxyapi-pro-core
@@ -181,114 +172,150 @@ docker build \
   ./cliproxyapi-pro-core
 ```
 
-### Apply the management customization layer
+Build args:
 
-```bash
-./cliproxyapi-pro-management/apply.sh /path/to/Cli-Proxy-API-Management-Center
-```
+- `CLIPROXY_REPO` — upstream repository, default `router-for-me/CLIProxyAPI`.
+- `CLIPROXY_VERSION` — upstream release tag. If empty, the Dockerfile resolves the latest release.
+- `GITHUB_TOKEN` — optional token for GitHub API requests.
 
-Or:
-
-```bash
-python3 ./cliproxyapi-pro-management/apply_customizations.py /path/to/Cli-Proxy-API-Management-Center
-```
-
-The target must be an upstream management-center checkout containing:
-
-- `src/`
-- `package.json`
-
-After applying customizations, run in the target directory:
-
-```bash
-npm install
-npm run type-check
-npm run build
-```
-
-## Runtime data directory
-
-The core image uses this directory by default:
-
-```text
-/CLIProxyAPI/usage
-```
-
-It stores:
-
-- usage SQLite database: `usage.sqlite`
-- account-inspection schedule file: `account-inspection-schedule.json`
-- quota cache
-- model prices
-
-Configure a persistent volume for this directory in production.
-
-## Key environment variables
+## Runtime environment variables
 
 ### Usage service
 
-```text
-USAGE_SERVICE_ENABLED
-USAGE_DATA_DIR
-USAGE_DB_PATH
-USAGE_BATCH_SIZE
-USAGE_POLL_INTERVAL_MS
-USAGE_QUERY_LIMIT
-```
-
-### WebDAV restore
-
-```text
-WEBDAV_URL
-WEBDAV_USERNAME
-WEBDAV_PASSWORD
-MANAGEMENT_PASSWORD
-```
+- `USAGE_SERVICE_ENABLED` — default `true`; set to `false`/`0`/`no`/`off` to disable the embedded service.
+- `USAGE_DATA_DIR` — default `/CLIProxyAPI/usage`.
+- `USAGE_DB_PATH` — default `/CLIProxyAPI/usage/usage.sqlite`.
+- `USAGE_BATCH_SIZE` — default `100`.
+- `USAGE_POLL_INTERVAL_MS` — default `500`.
+- `USAGE_QUERY_LIMIT` — default `50000`.
 
 ### Account inspection
 
+- `ACCOUNT_INSPECTION_SCHEDULE_PATH` — optional schedule JSON path. Defaults to `USAGE_DATA_DIR/account-inspection-schedule.json`.
+
+### WebDAV usage restore
+
+When all variables below are configured, `entrypoint.sh` waits for the local API to become ready, downloads the latest backup from WebDAV, and imports it into `/v0/management/usage/import`:
+
+- `WEBDAV_URL`
+- `WEBDAV_USERNAME`
+- `WEBDAV_PASSWORD`
+- `MANAGEMENT_PASSWORD`
+
+Restore lookup supports both backup names:
+
 ```text
-ACCOUNT_INSPECTION_SCHEDULE_PATH
+usage-export-YYYYMMDD_HHMMSS.json
+usage-export-YYYYMMDD_HHMMSS.jsonl
+```
+
+The import request uses:
+
+```text
+Content-Type: application/x-ndjson
 ```
 
 ### Komari agent
 
+- `KOMARI_SERVER`
+- `KOMARI_SECRET`
+
+## GitHub Actions
+
+Workflow:
+
 ```text
-KOMARI_SERVER
-KOMARI_SECRET
+.github/workflows/release-core.yml
 ```
 
-For full details, see `cliproxyapi-pro-core/README.md`.
+The workflow:
 
-## Design principles
+1. Checks the latest upstream CLIProxyAPI release.
+2. Compares it with the latest Docker Hub image tag.
+3. Builds and pushes a `linux/amd64` and `linux/arm64` Docker image when upstream is newer.
+4. Exports usage statistics from one or more running CPA instances to WebDAV.
+5. Triggers one or more Render deployments.
+6. Sends a Telegram notification.
+7. Deletes old workflow runs.
 
-This project follows a minimal customization approach:
+### Required Docker secrets
 
-- Do not vendor full upstream source code.
-- Prefer overlays and patches for customization.
-- Reapply the customization layer when upstream updates.
-- Keep documentation, scripts, and workflows verifiable and repeatable.
+- `DOCKER_USERNAME`
+- `DOCKER_PASSWORD`
 
-## Copyright and acknowledgements
+### Multi-instance usage backup
 
-This repository is a customization layer and release workflow for upstream projects. It does not claim ownership of upstream code, names, or assets. Upstream code and artifacts retain their original copyright notices and licenses.
+The workflow uses one optional JSON secret for all WebDAV backup targets:
 
-- `router-for-me/CLIProxyAPI` is licensed under the MIT License. Its upstream `LICENSE` currently states:
-  - Copyright (c) 2025-2005.9 Luis Pater
-  - Copyright (c) 2025.9-present Router-For.ME
-- `router-for-me/Cli-Proxy-API-Management-Center` is licensed under the MIT License. Its upstream `LICENSE` currently states:
-  - Copyright (c) 2026 Router-For.ME
+```text
+CLIPROXY_USAGE_BACKUP_TARGETS
+```
 
-Special thanks to:
+Example:
 
-- [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) — the upstream backend project this core customization layer builds on.
-- [router-for-me/Cli-Proxy-API-Management-Center](https://github.com/router-for-me/Cli-Proxy-API-Management-Center) — the upstream management UI this frontend customization layer builds on.
-- [seakee/CPA-Manager](https://github.com/seakee/CPA-Manager) — an important CLIProxyAPI management and monitoring project that inspired the Pro usage, monitoring, and account-inspection direction.
+```json
+[
+  {
+    "name": "cpa-main",
+    "api_url": "https://cpa-main.example.com",
+    "management_password": "management-password-1",
+    "webdav_url": "https://webdav.example.com/cpa-main",
+    "webdav_username": "webdav-user-1",
+    "webdav_password": "webdav-password-1"
+  }
+]
+```
 
-## Documentation
+Each target is exported from its own CPA API and uploaded to its own WebDAV directory as:
 
-- Core English README: `cliproxyapi-pro-core/README.md`
-- Core Chinese README: `cliproxyapi-pro-core/README_CN.md`
-- Management English README: `cliproxyapi-pro-management/README.md`
-- Management Chinese README: `cliproxyapi-pro-management/README_CN.md`
-- Chinese project overview: `README_CN.md`
+```text
+usage-export-YYYYMMDD_HHMMSS.jsonl
+```
+
+The workflow keeps the latest 7 backups per WebDAV directory and cleans both `.jsonl` and legacy `.json` files. If the secret is missing, invalid, or a target fails, the workflow logs a warning and continues.
+
+### Multi-target Render deploy hooks
+
+The workflow uses one optional JSON secret for all Render deploy hooks:
+
+```text
+CLIPROXY_RENDER_DEPLOY_HOOKS
+```
+
+Example:
+
+```json
+[
+  {
+    "name": "cpa-main",
+    "hook_url": "https://api.render.com/deploy/srv-xxx?key=xxx"
+  }
+]
+```
+
+`url` is also accepted as an alias for `hook_url`. If the secret is missing, invalid, or a target fails, the workflow logs a warning and continues.
+
+### Telegram notification secrets
+
+- `TELEGRAM_CHAT_ID`
+- `TELEGRAM_BOT_TOKEN`
+
+## Local validation
+
+Validate the embedded usage package against an upstream checkout:
+
+```bash
+cp -R /path/to/CLIProxyAPI /tmp/cliproxy-check
+rm -rf /tmp/cliproxy-check/internal/embeddedusage
+cp -R cliproxyapi-pro-core/embeddedusage /tmp/cliproxy-check/internal/embeddedusage
+cp cliproxyapi-pro-core/patches/account_inspection_scheduler.go /tmp/account_inspection_scheduler.go
+SRC_ROOT=/tmp/cliproxy-check python3 cliproxyapi-pro-core/patches/apply_upstream_patches.py
+go -C /tmp/cliproxy-check mod tidy
+go -C /tmp/cliproxy-check test ./internal/embeddedusage/...
+```
+
+Validate entrypoint syntax:
+
+```bash
+sh -n cliproxyapi-pro-core/entrypoint.sh
+```
