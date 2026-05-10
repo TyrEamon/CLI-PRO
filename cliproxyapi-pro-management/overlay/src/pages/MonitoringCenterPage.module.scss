@@ -76,22 +76,6 @@
   min-width: 0;
 }
 
-.eyebrow {
-  display: inline-flex;
-  width: fit-content;
-  align-items: center;
-  min-height: 24px;
-  padding: 0 10px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--monitor-accent) 14%, transparent);
-  background: color-mix(in srgb, var(--monitor-accent) 7%, var(--monitor-surface));
-  color: var(--monitor-accent-strong);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .titleRow {
   display: flex;
   align-items: center;

@@ -1050,11 +1050,6 @@ export function MonitoringCenterPage() {
       tone: hasPrices ? undefined : 'warn',
     },
     {
-      label: t('monitoring.total_tokens'),
-      value: formatCompactNumber(scopedSummary.totalTokens),
-      meta: `${t('monitoring.reasoning_tokens')} ${formatCompactNumber(scopedSummary.reasoningTokens)}`,
-    },
-    {
       label: t('monitoring.input_tokens'),
       value: formatCompactNumber(scopedSummary.inputTokens),
       meta: `${t('monitoring.of_token_mix')} ${formatPercent(scopedSummary.totalTokens > 0 ? scopedSummary.inputTokens / scopedSummary.totalTokens : 0)}`,
@@ -1309,7 +1304,6 @@ export function MonitoringCenterPage() {
         <div className={styles.mastheadGlow} aria-hidden="true" />
 
         <div className={styles.mastheadCopy}>
-          <span className={styles.eyebrow}>{t('monitoring.realtime_console_eyebrow')}</span>
           <div className={styles.titleRow}>
             <h1 className={styles.title}>{t('monitoring.title')}</h1>
             <div className={styles.titleActions}>

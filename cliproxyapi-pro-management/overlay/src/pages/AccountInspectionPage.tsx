@@ -9,7 +9,6 @@ import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import {
   IconChevronDown,
   IconChevronUp,
-  IconShield,
 } from '@/components/ui/icons';
 import {
   ACCOUNT_INSPECTION_SETTING_LIMITS,
@@ -1135,10 +1134,6 @@ export function AccountInspectionPage() {
       <Card className={styles.heroCard}>
         <div className={styles.heroHeader}>
           <div className={styles.heroCopy}>
-            <div className={styles.heroEyebrow}>
-              <IconShield size={14} />
-              <span>{t('monitoring.account_inspection_eyebrow')}</span>
-            </div>
             <h1 className={styles.heroTitle}>{t('monitoring.account_inspection_title')}</h1>
             <p className={styles.heroSubtitle}>{t('monitoring.account_inspection_desc')}</p>
           </div>
@@ -1158,32 +1153,6 @@ export function AccountInspectionPage() {
               disabled={(runStatus === 'running' || runStatus === 'paused') || executing}
             >
               {t('monitoring.account_inspection_settings_button')}
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={handleRunInspection}
-              loading={runStatus === 'running'}
-              disabled={runStatus === 'running' || executing || connectionStatus !== 'connected'}
-            >
-              {runStatus === 'paused'
-                ? t('monitoring.account_inspection_resume')
-                : runStatus === 'running'
-                  ? t('monitoring.account_inspection_running')
-                  : t('monitoring.account_inspection_run')}
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={handlePauseInspection}
-              disabled={runStatus !== 'running' || executing}
-            >
-              {t('monitoring.account_inspection_pause')}
-            </Button>
-            <Button
-              variant="danger"
-              onClick={handleStopInspection}
-              disabled={(runStatus !== 'running' && runStatus !== 'paused') || executing}
-            >
-              {t('monitoring.account_inspection_stop')}
             </Button>
           </div>
         </div>
@@ -1231,9 +1200,39 @@ export function AccountInspectionPage() {
           <div className={styles.progressTrack}>
             <span className={styles.progressBar} style={{ width: `${Math.max(0, Math.min(100, progress.percent))}%` }} />
           </div>
-          <div className={styles.progressMeta}>
-            <span>{progressLabel}</span>
-            {runStatus === 'paused' ? <strong>{t('monitoring.account_inspection_paused')}</strong> : null}
+          <div className={styles.progressFooter}>
+            <div className={styles.progressMeta}>
+              <span>{progressLabel}</span>
+              {runStatus === 'paused' ? <strong>{t('monitoring.account_inspection_paused')}</strong> : null}
+            </div>
+            <div className={styles.progressActions}>
+              <Button
+                variant="secondary"
+                onClick={handleRunInspection}
+                loading={runStatus === 'running'}
+                disabled={runStatus === 'running' || executing || connectionStatus !== 'connected'}
+              >
+                {runStatus === 'paused'
+                  ? t('monitoring.account_inspection_resume')
+                  : runStatus === 'running'
+                    ? t('monitoring.account_inspection_running')
+                    : t('monitoring.account_inspection_run')}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={handlePauseInspection}
+                disabled={runStatus !== 'running' || executing}
+              >
+                {t('monitoring.account_inspection_pause')}
+              </Button>
+              <Button
+                variant="danger"
+                onClick={handleStopInspection}
+                disabled={(runStatus !== 'running' && runStatus !== 'paused') || executing}
+              >
+                {t('monitoring.account_inspection_stop')}
+              </Button>
+            </div>
           </div>
         </div>
       </Card>
