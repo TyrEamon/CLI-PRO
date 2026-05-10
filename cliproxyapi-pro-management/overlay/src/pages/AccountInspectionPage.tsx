@@ -1140,6 +1140,7 @@ export function AccountInspectionPage() {
               <span>{t('monitoring.account_inspection_eyebrow')}</span>
             </div>
             <h1 className={styles.heroTitle}>{t('monitoring.account_inspection_title')}</h1>
+            <p className={styles.heroSubtitle}>{t('monitoring.account_inspection_desc')}</p>
           </div>
 
           <div className={styles.heroActions}>

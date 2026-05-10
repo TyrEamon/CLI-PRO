@@ -2,13 +2,13 @@
 .settingsModal {
   --inspect-bg: var(--bg-secondary);
   --inspect-surface: var(--bg-primary);
-  --inspect-surface-elevated: color-mix(in srgb, var(--bg-primary) 84%, var(--bg-secondary));
-  --inspect-surface-muted: var(--bg-tertiary);
+  --inspect-surface-elevated: color-mix(in srgb, var(--bg-primary) 88%, var(--bg-secondary));
+  --inspect-surface-muted: var(--bg-secondary);
   --inspect-line: var(--border-color);
   --inspect-line-strong: var(--border-primary);
   --inspect-ink: var(--text-primary);
   --inspect-muted: var(--text-secondary);
-  --inspect-accent: #2563eb;
+  --inspect-accent: var(--primary-color);
   --inspect-accent-soft: rgba(37, 99, 235, 0.12);
   --inspect-green: var(--success-color);
   --inspect-amber: #d97706;
@@ -18,7 +18,7 @@
 
 .page {
   display: grid;
-  gap: 20px;
+  gap: 18px;
   min-width: 0;
 }
 
@@ -26,14 +26,14 @@
 .summaryCard,
 .panel {
   border: 1px solid var(--inspect-line);
-  border-radius: 24px;
+  border-radius: 16px;
   background: var(--inspect-surface);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow);
 }
 
 .heroCard,
 .panel {
-  padding: 24px;
+  padding: 20px;
 }
 
 .heroHeader,
@@ -44,7 +44,11 @@
 }
 
 .heroHeader {
-  align-items: flex-start;
+  align-items: center;
+}
+
+.heroCopy {
+  max-width: 760px;
 }
 
 .heroCopy,
@@ -81,9 +85,9 @@
 }
 
 .heroTitle {
-  font-size: clamp(32px, 3vw, 46px);
-  line-height: 0.98;
-  letter-spacing: -0.04em;
+  font-size: 28px;
+  line-height: 1.15;
+  letter-spacing: 0;
 }
 
 .heroSubtitle,
@@ -97,7 +101,11 @@
 .heroSubtitle,
 .panelSubtitle {
   margin: 0;
-  line-height: 1.7;
+  line-height: 1.6;
+}
+
+.heroSubtitle {
+  font-size: 14px;
 }
 
 .heroActions,
@@ -112,6 +120,11 @@
 
 .heroActions {
   justify-content: flex-end;
+  gap: 8px;
+}
+
+.heroActions :global(.btn) {
+  padding: 8px 12px;
 }
 
 .backLink,
@@ -149,30 +162,30 @@
 }
 
 .metaRow {
-  margin-top: 18px;
+  margin-top: 16px;
 }
 
 .metaPill,
 .panelMeta span {
   display: inline-flex;
   align-items: center;
-  min-height: 34px;
-  padding: 0 12px;
+  min-height: 30px;
+  padding: 0 10px;
   border-radius: 999px;
   background: var(--inspect-surface-muted);
   color: var(--inspect-muted);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .progressSection {
   display: grid;
   gap: 10px;
-  margin-top: 18px;
-  padding: 14px 16px;
-  border-radius: 16px;
-  border: 1px solid color-mix(in srgb, var(--inspect-accent) 24%, var(--inspect-line));
-  background: color-mix(in srgb, var(--inspect-accent) 7%, var(--inspect-surface));
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--inspect-accent) 18%, var(--inspect-line));
+  background: var(--inspect-surface-muted);
 }
 
 .progressHeader,
@@ -222,25 +235,25 @@
 .summaryGrid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 14px;
+  gap: 12px;
 }
 
 .summaryCard {
   display: grid;
-  gap: 8px;
-  padding: 18px;
+  gap: 6px;
+  padding: 16px;
 }
 
 .summaryCard span {
   color: var(--inspect-muted);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .summaryCard strong {
-  font-size: 28px;
+  font-size: 24px;
   line-height: 1;
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
 }
 
 .summaryGood {
@@ -260,7 +273,7 @@
 
 .panel {
   display: grid;
-  gap: 18px;
+  gap: 16px;
 }
 
 .settingsModal :global(.modal-body) {
@@ -512,7 +525,7 @@
 .tableWrap {
   overflow: auto;
   border: 1px solid var(--inspect-line);
-  border-radius: 20px;
+  border-radius: 12px;
 }
 
 .table {
@@ -556,7 +569,7 @@
 
 .table th,
 .table td {
-  padding: 14px 16px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--inspect-line);
   text-align: left;
   vertical-align: top;
@@ -566,7 +579,7 @@
   position: sticky;
   top: 0;
   z-index: 1;
-  background: color-mix(in srgb, var(--inspect-accent) 4%, var(--inspect-surface));
+  background: var(--inspect-surface-muted);
   color: var(--inspect-muted);
   font-size: 12px;
   font-weight: 700;
@@ -664,7 +677,9 @@
     flex-direction: column;
   }
 
-  .heroActions {
+  .heroActions,
+  .panelActions,
+  .resultsHeaderActions {
     justify-content: flex-start;
   }
 
@@ -688,8 +703,8 @@
 @media (max-width: 640px) {
   .heroCard,
   .panel {
-    padding: 18px;
-    border-radius: 20px;
+    padding: 16px;
+    border-radius: 12px;
   }
 
   .summaryGrid {
@@ -697,7 +712,11 @@
   }
 
   .heroTitle {
-    font-size: 30px;
+    font-size: 28px;
+  }
+
+  .heroActions :global(.btn) {
+    flex: 1 1 140px;
   }
 
   .settingsField,

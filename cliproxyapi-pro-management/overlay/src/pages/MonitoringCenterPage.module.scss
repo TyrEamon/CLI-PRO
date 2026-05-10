@@ -2,15 +2,15 @@
 .monitorModal {
   --monitor-bg: var(--bg-secondary);
   --monitor-surface: var(--bg-primary);
-  --monitor-surface-elevated: color-mix(in srgb, var(--bg-primary) 82%, var(--bg-secondary));
-  --monitor-surface-muted: var(--bg-tertiary);
-  --monitor-surface-hover: color-mix(in srgb, var(--bg-tertiary) 74%, var(--bg-primary));
+  --monitor-surface-elevated: color-mix(in srgb, var(--bg-primary) 88%, var(--bg-secondary));
+  --monitor-surface-muted: var(--bg-secondary);
+  --monitor-surface-hover: var(--bg-tertiary);
   --monitor-ink: var(--text-primary);
   --monitor-muted: var(--text-secondary);
   --monitor-line: var(--border-color);
   --monitor-line-strong: var(--border-primary);
-  --monitor-accent: #3b82f6;
-  --monitor-accent-strong: #2563eb;
+  --monitor-accent: var(--primary-color);
+  --monitor-accent-strong: var(--primary-color);
   --monitor-accent-soft: rgba(59, 130, 246, 0.12);
   --monitor-cyan: #06b6d4;
   --monitor-green: var(--success-color);
@@ -22,7 +22,7 @@
 .page {
   container: monitoring-page / inline-size;
   display: grid;
-  gap: 20px;
+  gap: 18px;
   min-width: 0;
 }
 
@@ -53,9 +53,9 @@
   position: relative;
   overflow: hidden;
   border: 1px solid var(--monitor-line);
-  border-radius: 24px;
+  border-radius: 16px;
   background: var(--monitor-surface);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow);
 }
 
 .masthead {
@@ -63,7 +63,7 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 18px;
-  padding: 20px 22px;
+  padding: 20px;
 }
 
 .mastheadGlow {
@@ -80,7 +80,7 @@
   display: inline-flex;
   width: fit-content;
   align-items: center;
-  min-height: 26px;
+  min-height: 24px;
   padding: 0 10px;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--monitor-accent) 14%, transparent);
@@ -88,7 +88,7 @@
   color: var(--monitor-accent-strong);
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -103,9 +103,9 @@
 .title {
   margin: 0;
   min-width: 0;
-  font-size: clamp(30px, 2.4vw, 42px);
-  line-height: 1;
-  letter-spacing: -0.045em;
+  font-size: 28px;
+  line-height: 1.15;
+  letter-spacing: 0;
 }
 
 .titleActions {
@@ -132,7 +132,7 @@
   display: grid;
   justify-items: end;
   gap: 10px;
-  min-width: 390px;
+  min-width: 320px;
 }
 
 .mastheadControlRow {
@@ -201,12 +201,12 @@
 
 .refreshCluster {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
   padding: 5px;
-  border-radius: 16px;
+  border-radius: 12px;
   border: 1px solid var(--monitor-line);
   background: var(--monitor-surface-elevated);
 }
@@ -226,8 +226,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 36px;
-  padding: 0 12px;
+  min-height: 34px;
+  padding: 0 10px;
   border-radius: 999px;
   border: 1px solid var(--monitor-line);
   background: var(--monitor-surface-elevated);
@@ -370,7 +370,7 @@
 
 .panel {
   min-width: 0;
-  padding: 22px;
+  padding: 20px;
 }
 
 .panelHeader {
@@ -404,7 +404,7 @@
 }
 
 .toolbarPanel .panelHeader {
-  align-items: center;
+  align-items: flex-start;
   margin-bottom: 12px;
 }
 
@@ -417,7 +417,7 @@
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  width: min(460px, 46vw);
+  width: min(420px, 44vw);
   min-width: 0;
 }
 
@@ -507,15 +507,15 @@
 .summaryGrid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
+  gap: 12px;
 }
 
 .summaryCard {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
-  min-height: 138px;
-  padding: 18px;
+  min-height: 120px;
+  padding: 16px;
   background: var(--monitor-surface-elevated);
   transition:
     transform 0.18s ease,
@@ -546,7 +546,7 @@
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
-  font-size: clamp(24px, 2vw, 32px);
+  font-size: clamp(22px, 1.8vw, 28px);
   line-height: 1;
   letter-spacing: 0;
   text-overflow: ellipsis;
@@ -817,6 +817,8 @@
   overflow: auto;
   overscroll-behavior: contain;
   padding-right: 2px;
+  border: 1px solid var(--monitor-line);
+  border-radius: 12px;
 }
 
 .accountTableWrapper {
@@ -859,8 +861,8 @@
 .table {
   width: 100%;
   min-width: 0;
-  border-collapse: separate;
-  border-spacing: 0 10px;
+  border-collapse: collapse;
+  border-spacing: 0;
 }
 
 .accountOverviewTable {
@@ -1015,8 +1017,8 @@
   position: sticky;
   top: 0;
   z-index: 3;
-  padding: 8px 6px 6px;
-  background: var(--monitor-surface);
+  padding: 10px 8px;
+  background: var(--monitor-surface-muted);
   text-align: left;
   color: var(--monitor-muted);
   font-size: 10px;
@@ -1086,28 +1088,31 @@
 
 .table tbody td {
   min-width: 0;
-  padding: 10px 5px;
+  padding: 10px 8px;
   vertical-align: middle;
   white-space: nowrap;
   border-top: 1px solid var(--monitor-line);
-  border-bottom: 1px solid var(--monitor-line);
-  background: var(--monitor-surface-elevated);
+  background: var(--monitor-surface);
   font-size: 12px;
   line-height: 1.35;
 }
 
 .table tbody td:first-child {
-  border-left: 1px solid var(--monitor-line);
-  border-radius: 18px 0 0 18px;
+  border-left: 0;
+  border-radius: 0;
 }
 
 .table tbody td:last-child {
-  border-right: 1px solid var(--monitor-line);
+  border-right: 0;
 }
 
 //.table tbody tr:hover td {
 //  background: var(--monitor-surface-hover);
 //}
+
+.table tbody tr:nth-child(2n) td {
+  background: var(--monitor-surface-elevated);
+}
 
 .innerTable {
   min-width: 940px;
@@ -1229,8 +1234,8 @@
 }
 
 .expandedAccountCardRow td {
-  padding: 4px 0 10px;
-  border: 0;
+  padding: 8px 0;
+  border-top: 1px solid var(--monitor-line);
   background: transparent;
   white-space: normal;
 }
@@ -1246,16 +1251,11 @@
 
 .expandedAccountCard {
   display: grid;
-  gap: 18px;
+  gap: 16px;
   min-width: 0;
-  border-radius: 22px;
-  border: 0;
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--monitor-surface-elevated) 94%, white 6%),
-      var(--monitor-surface-elevated)
-    );
+  border-radius: 12px;
+  border: 1px solid var(--monitor-line);
+  background: var(--monitor-surface-elevated);
 }
 
 .expandedAccountSummary {
@@ -1495,7 +1495,7 @@
   }
 }
 
-@container monitoring-page (max-width: 1240px) {
+@container monitoring-page (max-width: 1120px) {
   .masthead {
     grid-template-columns: 1fr;
     align-items: start;
@@ -1561,12 +1561,12 @@
   .masthead,
   .panel,
   .summaryCard {
-    border-radius: 20px;
+    border-radius: 12px;
   }
 
   .masthead,
   .panel {
-    padding: 18px;
+    padding: 16px;
   }
 
   .masthead {
@@ -1585,7 +1585,7 @@
   }
 
   .title {
-    font-size: 32px;
+    font-size: 28px;
   }
 
   .subtitle {
