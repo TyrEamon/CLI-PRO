@@ -433,6 +433,10 @@
   background: var(--monitor-surface);
 }
 
+.accountPanelActions {
+  min-width: 180px;
+}
+
 .toolbarControlRow {
   display: flex;
   align-items: center;

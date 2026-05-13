@@ -68,6 +68,13 @@ const maskAuthIndex = (value: string) => {
   return `${trimmed.slice(0, 4)}...${trimmed.slice(-4)}`;
 };
 
+const maskHash = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === '-') return '-';
+  if (trimmed.length <= 12) return trimmed;
+  return `${trimmed.slice(0, 6)}...${trimmed.slice(-6)}`;
+};
+
 const parseBoolean = (value: unknown) => {
   if (typeof value === 'boolean') return value;
   if (typeof value === 'number') return value !== 0;
@@ -264,6 +271,8 @@ export type MonitoringEventRow = {
   accountMasked: string;
   authIndex: string;
   authIndexMasked: string;
+  apiKeyHash: string;
+  apiKeyMasked: string;
   authLabel: string;
   provider: string;
   planType: string;
@@ -306,6 +315,8 @@ export type MonitoringSummary = {
   zeroTokenModels: string[];
 };
 
+export type MonitoringAccountGroupBy = 'account' | 'apiKey' | 'model';
+
 export type MonitoringAccountModelSpendRow = {
   model: string;
   totalCalls: number;
@@ -322,6 +333,10 @@ export type MonitoringAccountModelSpendRow = {
 
 export type MonitoringAccountRow = {
   id: string;
+  group: MonitoringAccountGroupBy;
+  model: string;
+  apiKeyHash: string;
+  apiKeyMasked: string;
   account: string;
   accountMasked: string;
   authLabels: string[];
@@ -682,13 +697,18 @@ export const buildMonitoringSummary = (rows: MonitoringEventRow[]): MonitoringSu
   };
 };
 
-export const buildAccountRows = (rows: MonitoringEventRow[]): MonitoringAccountRow[] => {
+export const buildAccountRows = (
+  rows: MonitoringEventRow[],
+  groupBy: MonitoringAccountGroupBy = 'account'
+): MonitoringAccountRow[] => {
   const grouped = new Map<
     string,
     {
       id: string;
       account: string;
       accountMasked: string;
+      apiKeyHash: string;
+      apiKeyMasked: string;
       authLabels: Set<string>;
       authIndices: Set<string>;
       channels: Set<string>;
@@ -722,12 +742,44 @@ export const buildAccountRows = (rows: MonitoringEventRow[]): MonitoringAccountR
     }
   >();
 
-  rows.forEach((row) => {
+  const getGroupIdentity = (row: MonitoringEventRow) => {
+    if (groupBy === 'apiKey') {
+      const label = row.apiKeyMasked !== '-' ? row.apiKeyMasked : row.authIndexMasked;
+      return {
+        id: `apiKey:${row.apiKeyHash !== '-' ? row.apiKeyHash : row.authIndex}`,
+        account: label,
+        accountMasked: label,
+        apiKeyHash: row.apiKeyHash,
+        apiKeyMasked: row.apiKeyMasked,
+      };
+    }
+    if (groupBy === 'model') {
+      return {
+        id: `model:${row.model}`,
+        account: row.model,
+        accountMasked: row.model,
+        apiKeyHash: '-',
+        apiKeyMasked: '-',
+      };
+    }
     const accountKey = row.account || row.authLabel || row.source;
-    const existing = grouped.get(accountKey) ?? {
-      id: accountKey,
+    return {
+      id: `account:${accountKey}`,
       account: row.account,
       accountMasked: row.accountMasked,
+      apiKeyHash: row.apiKeyHash,
+      apiKeyMasked: row.apiKeyMasked,
+    };
+  };
+
+  rows.forEach((row) => {
+    const identity = getGroupIdentity(row);
+    const existing = grouped.get(identity.id) ?? {
+      id: identity.id,
+      account: identity.account,
+      accountMasked: identity.accountMasked,
+      apiKeyHash: identity.apiKeyHash,
+      apiKeyMasked: identity.apiKeyMasked,
       authLabels: new Set<string>(),
       authIndices: new Set<string>(),
       channels: new Set<string>(),
@@ -789,12 +841,16 @@ export const buildAccountRows = (rows: MonitoringEventRow[]): MonitoringAccountR
     modelEntry.lastSeenAt = Math.max(modelEntry.lastSeenAt, row.timestampMs);
     existing.modelMap.set(row.model, modelEntry);
 
-    grouped.set(accountKey, existing);
+    grouped.set(identity.id, existing);
   });
 
   return Array.from(grouped.values())
     .map((item) => ({
       id: item.id,
+      group: groupBy,
+      model: groupBy === 'model' ? item.account : '-',
+      apiKeyHash: item.apiKeyHash,
+      apiKeyMasked: item.apiKeyMasked,
       account: item.account,
       accountMasked: item.accountMasked,
       authLabels: Array.from(item.authLabels).sort(),
@@ -1340,6 +1396,8 @@ const buildEventRows = (
       );
       const totalTokens = Math.max(Number(detail.tokens?.total_tokens) || 0, extractTotalTokens(detail));
       const totalCost = calculateCost(detail, modelPrices);
+      const apiKeyHash = readString(detail.api_key_hash) || '-';
+      const apiKeyMasked = apiKeyHash === '-' ? '-' : maskHash(apiKeyHash);
       const statsIncluded = detail.failed === true || inputTokens > 0 || outputTokens > 0;
       const dayKey = buildLocalDayKey(timestampMs);
       const hourLabel = buildHourLabel(timestampMs);
@@ -1363,6 +1421,8 @@ const buildEventRows = (
         accountMasked,
         authIndex,
         authIndexMasked: maskAuthIndex(authIndex),
+        apiKeyHash,
+        apiKeyMasked,
         authLabel: authMeta?.label || sourceMasked,
         provider: authMeta?.provider || sourceMeta.type || '-',
         planType: authMeta?.planType || '-',
@@ -1390,7 +1450,8 @@ const buildEventRows = (
           endpointPath,
           endpointMethod,
           authMeta?.provider,
-          authMeta?.planType
+          authMeta?.planType,
+          apiKeyMasked
         ),
       } satisfies MonitoringEventRow;
     })

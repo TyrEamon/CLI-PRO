@@ -19,6 +19,7 @@ import {
   buildAccountRows,
   buildMonitoringSummary,
   useMonitoringData,
+  type MonitoringAccountGroupBy,
   type MonitoringAccountRow,
   type MonitoringEventRow,
   type MonitoringStatusTone,
@@ -61,6 +62,12 @@ const AUTO_REFRESH_OPTIONS = [
   { value: '30000', labelKey: 'monitoring.auto_refresh_30s' },
   { value: '60000', labelKey: 'monitoring.auto_refresh_60s' },
   { value: '300000', labelKey: 'monitoring.auto_refresh_5m' },
+];
+
+const ACCOUNT_GROUP_OPTIONS: Array<{ value: MonitoringAccountGroupBy; labelKey: string }> = [
+  { value: 'account', labelKey: 'monitoring.group_by_account' },
+  { value: 'apiKey', labelKey: 'monitoring.group_by_api_key' },
+  { value: 'model', labelKey: 'monitoring.group_by_model' },
 ];
 
 const DEFAULT_ACCOUNT_SORT = {
@@ -123,6 +130,15 @@ const SuccessFailureValue = ({ success, failure }: { success: number; failure: n
 );
 
 const buildAccountSecondaryText = (row: MonitoringAccountRow) => {
+  if (row.group === 'apiKey') {
+    const accounts = row.authLabels.filter((label) => label && label !== row.account);
+    return accounts.length > 0 ? joinShort(accounts, 2) : joinShort(row.authIndices, 2);
+  }
+  if (row.group === 'model') {
+    const accounts = row.authLabels.filter(Boolean);
+    return accounts.length > 0 ? joinShort(accounts, 2) : joinShort(row.channels, 2);
+  }
+
   const extraAuthLabels = row.authLabels.filter((label) => label && label !== row.account);
   if (extraAuthLabels.length > 0) {
     return joinShort(extraAuthLabels, 2);
@@ -478,6 +494,7 @@ function ModelSpendTable({
   hasPrices,
   locale,
   t,
+  showQuota,
   quotaState,
   quotaEntries,
   onRefreshQuota,
@@ -486,6 +503,7 @@ function ModelSpendTable({
   hasPrices: boolean;
   locale: string;
   t: TFunction;
+  showQuota: boolean;
   quotaState?: AccountQuotaState;
   quotaEntries: AccountQuotaEntry[];
   onRefreshQuota: () => void;
@@ -520,7 +538,8 @@ function ModelSpendTable({
 
   return (
     <div className={styles.expandPanel}>
-      <section className={styles.quotaSection}>
+      {showQuota ? (
+        <section className={styles.quotaSection}>
         {quotaLoading && quotaEntries.length === 0 ? (
           <div className={styles.quotaStateMessage}>{t('codex_quota.loading')}</div>
         ) : null}
@@ -574,7 +593,8 @@ function ModelSpendTable({
             </div>
           </>
         ) : null}
-      </section>
+        </section>
+      ) : null}
 
       <div className={styles.tableWrapper}>
         <table className={`${styles.table} ${styles.innerTable}`}>
@@ -659,9 +679,11 @@ function ExpandedAccountCard({
           </div>
         ))}
         <div className={styles.expandedAccountAction}>
-          <button type="button" className={styles.inlineActionButton} onClick={onFocus}>
-            {isFocused ? t('monitoring.restore_account_scope') : t('monitoring.focus_account')}
-          </button>
+          {row.group === 'account' ? (
+            <button type="button" className={styles.inlineActionButton} onClick={onFocus}>
+              {isFocused ? t('monitoring.restore_account_scope') : t('monitoring.focus_account')}
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -671,6 +693,7 @@ function ExpandedAccountCard({
           hasPrices={hasPrices}
           locale={locale}
           t={t}
+          showQuota={row.group === 'account'}
           quotaState={quotaState}
           quotaEntries={quotaEntries}
           onRefreshQuota={onRefreshQuota}
@@ -694,6 +717,7 @@ export function MonitoringCenterPage() {
   const [selectedModel, setSelectedModel] = useState('all');
   const [selectedChannel, setSelectedChannel] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState<StatusFilter>('all');
+  const [accountGroupBy, setAccountGroupBy] = useState<MonitoringAccountGroupBy>('account');
   const [expandedAccounts, setExpandedAccounts] = useState<Record<string, boolean>>({});
   const [focusedAccount, setFocusedAccount] = useState<string | null>(null);
   const [isPriceModalOpen, setIsPriceModalOpen] = useState(false);
@@ -884,6 +908,11 @@ export function MonitoringCenterPage() {
     [t]
   );
 
+  const accountGroupOptions = useMemo(
+    () => ACCOUNT_GROUP_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) })),
+    [t]
+  );
+
   const priceModelOptions = useMemo(
     () => [
       { value: '', label: t('usage_stats.model_price_select_placeholder') },
@@ -933,7 +962,7 @@ export function MonitoringCenterPage() {
   const scopedStatsRows = useMemo(() => scopedRows.filter((row) => row.statsIncluded), [scopedRows]);
 
   const scopedSummary = useMemo(() => buildMonitoringSummary(scopedStatsRows), [scopedStatsRows]);
-  const accountRows = useMemo(() => buildAccountRows(scopedRows), [scopedRows]);
+  const accountRows = useMemo(() => buildAccountRows(scopedRows, accountGroupBy), [accountGroupBy, scopedRows]);
   const sortedAccountRows = useMemo(() => {
     const directionFactor = accountSort.direction === 'desc' ? -1 : 1;
 
@@ -1011,7 +1040,14 @@ export function MonitoringCenterPage() {
 
   const accountOverviewColumns = useMemo<AccountOverviewColumn[]>(
     () => [
-      { key: 'account', label: t('monitoring.account_label') },
+      {
+        key: 'account',
+        label: accountGroupBy === 'apiKey'
+          ? t('monitoring.api_key_label')
+          : accountGroupBy === 'model'
+            ? t('monitoring.model_label')
+            : t('monitoring.account_label'),
+      },
       { key: 'total-calls', label: t('monitoring.total_calls'), sortKey: 'totalCalls' },
       { key: 'success-calls', label: t('monitoring.success_calls'), sortKey: 'successCalls' },
       { key: 'total-tokens', label: t('monitoring.total_tokens'), sortKey: 'totalTokens' },
@@ -1022,14 +1058,14 @@ export function MonitoringCenterPage() {
       { key: 'latest-request-time', label: t('monitoring.latest_request_time'), sortKey: 'lastSeenAt' },
       { key: 'action', label: t('common.action') },
     ],
-    [t]
+    [accountGroupBy, t]
   );
 
   const summaryCards: SummaryCardProps[] = [
     {
       label: t('monitoring.total_calls'),
       value: formatCompactNumber(scopedSummary.totalCalls),
-      meta: `${accountRows.length} ${t('monitoring.accounts_suffix')}`,
+      meta: `${accountRows.length} ${accountGroupBy === 'apiKey' ? t('monitoring.api_keys_suffix') : accountGroupBy === 'model' ? t('monitoring.models_suffix') : t('monitoring.accounts_suffix')}`,
     },
     {
       label: t('monitoring.success_calls'),
@@ -1181,7 +1217,7 @@ export function MonitoringCenterPage() {
   );
 
   const toggleAccountExpanded = useCallback((accountId: string, account: string) => {
-    if (!expandedAccounts[accountId]) {
+    if (account && !expandedAccounts[accountId]) {
       void loadAccountQuota(account);
     }
     setExpandedAccounts((previous) => ({
@@ -1474,6 +1510,19 @@ export function MonitoringCenterPage() {
         title={t('monitoring.account_overview_title')}
         subtitle={t('monitoring.account_overview_desc')}
         className={styles.accountPanel}
+        extra={
+          <div className={styles.accountPanelActions}>
+            <Select
+              value={accountGroupBy}
+              options={accountGroupOptions}
+              onChange={(value) => {
+                setAccountGroupBy(value as MonitoringAccountGroupBy);
+                setExpandedAccounts({});
+              }}
+              ariaLabel={t('monitoring.account_group_by')}
+            />
+          </div>
+        }
       >
         <div className={`${styles.tableWrapper} ${styles.tableScrollWrapper} ${styles.accountTableWrapper}`}>
           <table className={`${styles.table} ${styles.accountOverviewTable}`}>
@@ -1524,7 +1573,7 @@ export function MonitoringCenterPage() {
             <tbody>
               {sortedAccountRows.map((row) => {
                 const isExpanded = Boolean(expandedAccounts[row.id]);
-                const isFocused = focusedAccount === row.account;
+                const isFocused = row.group === 'account' && focusedAccount === row.account;
                 const summaryMetrics = buildAccountSummaryMetrics(row, hasPrices, i18n.language, t);
 
                 if (isExpanded) {
@@ -1538,9 +1587,9 @@ export function MonitoringCenterPage() {
                           t={t}
                           summaryMetrics={summaryMetrics}
                           isFocused={isFocused}
-                          quotaState={accountQuotaStates[row.account]}
-                          quotaEntries={accountQuotaEntriesByAccount.get(row.account) ?? []}
-                          onToggle={() => toggleAccountExpanded(row.id, row.account)}
+                          quotaState={row.group === 'account' ? accountQuotaStates[row.account] : undefined}
+                          quotaEntries={row.group === 'account' ? accountQuotaEntriesByAccount.get(row.account) ?? [] : []}
+                          onToggle={() => toggleAccountExpanded(row.id, row.group === 'account' ? row.account : '')}
                           onFocus={() => focusAccount(row.account)}
                           onRefreshQuota={() => void loadAccountQuota(row.account, true)}
                         />
@@ -1555,7 +1604,7 @@ export function MonitoringCenterPage() {
                       <AccountSummaryPrimary
                         row={row}
                         expanded={false}
-                        onToggle={() => toggleAccountExpanded(row.id, row.account)}
+                        onToggle={() => toggleAccountExpanded(row.id, row.group === 'account' ? row.account : '')}
                       />
                     </td>
                     {summaryMetrics.map((metric) => (
@@ -1564,13 +1613,15 @@ export function MonitoringCenterPage() {
                       </td>
                     ))}
                     <td>
-                      <button
-                        type="button"
-                        className={styles.inlineActionButton}
-                        onClick={() => focusAccount(row.account)}
-                      >
-                        {isFocused ? t('monitoring.restore_account_scope') : t('monitoring.focus_account')}
-                      </button>
+                      {row.group === 'account' ? (
+                        <button
+                          type="button"
+                          className={styles.inlineActionButton}
+                          onClick={() => focusAccount(row.account)}
+                        >
+                          {isFocused ? t('monitoring.restore_account_scope') : t('monitoring.focus_account')}
+                        </button>
+                      ) : null}
                     </td>
                   </tr>
                 );

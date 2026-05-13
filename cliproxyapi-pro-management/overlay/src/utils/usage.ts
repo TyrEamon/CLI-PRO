@@ -25,6 +25,7 @@ export interface UsageDetail {
   timestamp: string;
   source: string;
   auth_index: string | number | null;
+  api_key_hash?: string;
   latency_ms?: number;
   tokens: UsageTokens;
   failed: boolean;
@@ -245,6 +246,11 @@ export function collectUsageDetails(usageData: unknown): UsageDetail[] {
             detailRaw.authIndex ??
             detailRaw.AuthIndex ??
             null) as UsageDetail['auth_index'],
+          api_key_hash: typeof detailRaw.api_key_hash === 'string'
+            ? detailRaw.api_key_hash
+            : typeof detailRaw.apiKeyHash === 'string'
+              ? detailRaw.apiKeyHash
+              : undefined,
           latency_ms: latencyMs ?? undefined,
           tokens: readTokens(detailRaw),
           failed: detailRaw.failed === true,
@@ -297,6 +303,11 @@ export function collectUsageDetailsWithEndpoint(usageData: unknown): UsageDetail
             detailRaw.authIndex ??
             detailRaw.AuthIndex ??
             null) as UsageDetail['auth_index'],
+          api_key_hash: typeof detailRaw.api_key_hash === 'string'
+            ? detailRaw.api_key_hash
+            : typeof detailRaw.apiKeyHash === 'string'
+              ? detailRaw.apiKeyHash
+              : undefined,
           latency_ms: latencyMs ?? undefined,
           tokens: readTokens(detailRaw),
           failed: detailRaw.failed === true,
