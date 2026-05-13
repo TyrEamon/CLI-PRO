@@ -977,6 +977,9 @@ func (s *accountInspectionScheduler) inspectAccount(ctx context.Context, account
 		result.Error = err.Error()
 		result.ActionReason = "探测异常，保留账号"
 		s.appendLog("warning", fmt.Sprintf("%s 探测异常，保留账号：%s", account.identity(), err.Error()))
+		if statusCode != nil && isAccountErrorStatus(*statusCode) {
+			s.syncInspectionAuthStatus(ctx, account, *statusCode)
+		}
 		return result
 	}
 	result.StatusCode = statusCode
@@ -984,6 +987,9 @@ func (s *accountInspectionScheduler) inspectAccount(ctx context.Context, account
 	result.ActionReason = decision.ActionReason
 	result.UsedPercent = decision.UsedPercent
 	result.IsQuota = decision.IsQuota
+	if statusCode != nil {
+		s.syncInspectionAuthStatus(ctx, account, *statusCode)
+	}
 	level := "info"
 	if result.Action == accountInspectionActionDisable {
 		level = "warning"
@@ -1352,6 +1358,53 @@ func isAccountErrorStatus(status int) bool {
 	return status == 400 || status == 401 || status == 403 || status == 404
 }
 
+func isInspectionAuthRecoveryStatus(status int) bool {
+	return (status >= 200 && status < 300) || status == 402 || status == 429
+}
+
+func (s *accountInspectionScheduler) syncInspectionAuthStatus(ctx context.Context, account accountInspectionAccount, status int) {
+	if s == nil || s.h == nil || s.h.authManager == nil || account.AuthIndex == "" {
+		return
+	}
+	auth := s.h.authByIndex(account.AuthIndex)
+	if auth == nil {
+		return
+	}
+	now := time.Now()
+	if isAccountErrorStatus(status) {
+		message := fmt.Sprintf("HTTP %d", status)
+		if auth.Status == coreauth.StatusError && auth.StatusMessage == message && auth.Unavailable && auth.LastError != nil && auth.LastError.HTTPStatus == status {
+			return
+		}
+		auth.Status = coreauth.StatusError
+		auth.StatusMessage = message
+		auth.Unavailable = true
+		auth.LastError = &coreauth.Error{Code: "inspection_http_error", Message: fmt.Sprintf("account inspection returned HTTP %d", status), HTTPStatus: status}
+		auth.UpdatedAt = now
+		if _, err := s.h.authManager.Update(ctx, auth); err != nil {
+			s.appendLog("warning", fmt.Sprintf("%s 认证状态回写失败：%s", account.identity(), err.Error()))
+		}
+		return
+	}
+	if !isInspectionAuthRecoveryStatus(status) {
+		return
+	}
+	if auth.Status == coreauth.StatusError && strings.HasPrefix(auth.StatusMessage, "HTTP ") {
+		if auth.Disabled {
+			auth.Status = coreauth.StatusDisabled
+		} else {
+			auth.Status = coreauth.StatusActive
+		}
+		auth.StatusMessage = ""
+		auth.Unavailable = false
+		auth.LastError = nil
+		auth.UpdatedAt = now
+		if _, err := s.h.authManager.Update(ctx, auth); err != nil {
+			s.appendLog("warning", fmt.Sprintf("%s 认证状态清理失败：%s", account.identity(), err.Error()))
+		}
+	}
+}
+
 func authErrorDecision(account accountInspectionAccount, status int) accountInspectionDecision {
 	if account.Disabled {
 		return accountInspectionDecision{Action: accountInspectionActionKeep, ActionReason: fmt.Sprintf("接口返回 %d，但账号已禁用", status)}
@@ -1548,6 +1601,8 @@ func (s *accountInspectionScheduler) executeAction(ctx context.Context, result a
 		} else {
 			auth.Status = coreauth.StatusActive
 			auth.StatusMessage = ""
+			auth.Unavailable = false
+			auth.LastError = nil
 		}
 		auth.UpdatedAt = time.Now()
 		_, err := s.h.authManager.Update(ctx, auth)
