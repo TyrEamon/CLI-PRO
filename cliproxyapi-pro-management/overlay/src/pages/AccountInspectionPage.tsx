@@ -39,8 +39,9 @@ import {
   type AccountInspectionScheduleResponse,
 } from '@/services/api';
 import { quotaPersistenceMiddleware } from '@/extensions/quota/persistenceMiddleware';
-import { useAuthStore, useConfigStore, useNotificationStore } from '@/stores';
-import type { AuthFileItem } from '@/types';
+import { useAuthStore, useConfigStore, useNotificationStore, useQuotaStore } from '@/stores';
+import type { AuthFileItem, AuthFilesResponse } from '@/types';
+import { isDisabledAuthFile, resolveAuthProvider } from '@/utils/quota';
 import styles from './AccountInspectionPage.module.scss';
 
 type RunStatus = 'idle' | 'running' | 'paused' | 'success' | 'error';
@@ -96,9 +97,13 @@ type ScheduleDraft = {
   intervalMinutes: string;
 };
 
-type AuthFilesResponse = {
-  files: AuthFileItem[];
-  total?: number;
+type AuthFileAccountStats = {
+  total: number;
+  providerCount: number;
+  enabled: number;
+  disabled: number;
+  quotaLow: number;
+  abnormal: number;
 };
 
 type AutoExecutionCounts = {
@@ -351,6 +356,109 @@ const resolveResultHealthStatus = (item: AccountInspectionResultItem): ResultHea
   if (item.action === 'enable') return 'recoverable';
   if (item.disabled) return 'disabled';
   return 'healthy';
+};
+
+const HEALTHY_AUTH_FILE_STATUS_MESSAGES = new Set(['ok', 'healthy', 'ready', 'success', 'available']);
+
+const readAuthFileStatusMessage = (file: AuthFileItem) => {
+  const raw = file['status_message'] ?? file.statusMessage;
+  if (raw === undefined || raw === null) return '';
+  return String(raw).trim();
+};
+
+const readBooleanValue = (value: unknown) => {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+  }
+  return false;
+};
+
+const isAuthFileAbnormal = (file: AuthFileItem) => {
+  if (readBooleanValue(file.unavailable ?? file['unavailable'])) return true;
+  const status = String(file.status ?? file.state ?? '').trim().toLowerCase();
+  if (['error', 'failed', 'invalid', 'unavailable', 'unauthorized', 'auth_invalid'].includes(status)) return true;
+  const message = readAuthFileStatusMessage(file);
+  return Boolean(message) && !HEALTHY_AUTH_FILE_STATUS_MESSAGES.has(message.toLowerCase());
+};
+
+const isRecordValue = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const readFiniteNumber = (value: unknown) => {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const hasQuotaLowWindow = (window: unknown) => {
+  if (!isRecordValue(window)) return false;
+  const usedPercent = readFiniteNumber(window.usedPercent ?? window.used_percent);
+  if (usedPercent !== null && usedPercent >= 100) return true;
+  const remainingFraction = readFiniteNumber(window.remainingFraction ?? window.remaining_fraction);
+  if (remainingFraction !== null && remainingFraction <= 0) return true;
+  const remainingAmount = readFiniteNumber(window.remainingAmount ?? window.remaining_amount ?? window.remaining);
+  if (remainingAmount !== null && remainingAmount <= 0) return true;
+  const limit = readFiniteNumber(window.limit);
+  const used = readFiniteNumber(window.used);
+  return limit !== null && limit > 0 && used !== null && used >= limit;
+};
+
+const isQuotaLowState = (quota: unknown) => {
+  if (!isRecordValue(quota) || quota.status !== 'success') return false;
+  return ['windows', 'groups', 'buckets', 'rows'].some((key) => {
+    const value = quota[key];
+    return Array.isArray(value) && value.some(hasQuotaLowWindow);
+  });
+};
+
+const buildAuthFileAccountStats = (
+  files: AuthFileItem[],
+  quotaStore: ReturnType<typeof useQuotaStore.getState>
+): AuthFileAccountStats => {
+  const providers = new Set<string>();
+  const stats: AuthFileAccountStats = {
+    total: files.length,
+    providerCount: 0,
+    enabled: 0,
+    disabled: 0,
+    quotaLow: 0,
+    abnormal: 0,
+  };
+
+  files.forEach((file) => {
+    const provider = resolveAuthProvider(file);
+    if (provider) providers.add(provider);
+
+    if (isDisabledAuthFile(file)) {
+      stats.disabled += 1;
+    } else {
+      stats.enabled += 1;
+    }
+
+    if (isAuthFileAbnormal(file)) {
+      stats.abnormal += 1;
+    }
+
+    if (
+      isQuotaLowState(quotaStore.antigravityQuota[file.name]) ||
+      isQuotaLowState(quotaStore.claudeQuota[file.name]) ||
+      isQuotaLowState(quotaStore.codexQuota[file.name]) ||
+      isQuotaLowState(quotaStore.geminiCliQuota[file.name]) ||
+      isQuotaLowState(quotaStore.kimiQuota[file.name])
+    ) {
+      stats.quotaLow += 1;
+    }
+  });
+
+  stats.providerCount = providers.size;
+  return stats;
 };
 
 const emptyHealthCounts = (): HealthCounts => ({
@@ -730,6 +838,7 @@ export function AccountInspectionPage() {
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
   const showNotification = useNotificationStore((state) => state.showNotification);
   const showConfirmation = useNotificationStore((state) => state.showConfirmation);
+  const quotaStore = useQuotaStore((state) => state);
 
   const [inspectionSettings, setInspectionSettings] = useState<AccountInspectionConfigurableSettings>(() =>
     loadAccountInspectionConfigurableSettings(config)
@@ -748,6 +857,8 @@ export function AccountInspectionPage() {
   const [runStatus, setRunStatus] = useState<RunStatus>('idle');
   const [progress, setProgress] = useState<AccountInspectionProgressSnapshot>(createIdleProgressSnapshot);
   const [result, setResult] = useState<AccountInspectionRunResult | null>(null);
+  const [authFiles, setAuthFiles] = useState<AuthFileItem[]>([]);
+  const [authFilesLoaded, setAuthFilesLoaded] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [exportingAuthFiles, setExportingAuthFiles] = useState(false);
   const [autoExecutionCounts, setAutoExecutionCounts] = useState<AutoExecutionCounts>(emptyAutoExecutionCounts);
@@ -761,6 +872,27 @@ export function AccountInspectionPage() {
       setSettingsDraft(toSettingsDraft(nextSettings));
     }
   }, [config, isSettingsModalOpen]);
+
+  const loadAuthFiles = useCallback(async () => {
+    if (connectionStatus !== 'connected') {
+      setAuthFiles([]);
+      setAuthFilesLoaded(false);
+      return;
+    }
+
+    try {
+      const response = await apiClient.get<AuthFilesResponse>('/auth-files');
+      setAuthFiles(Array.isArray(response.files) ? response.files : []);
+      setAuthFilesLoaded(true);
+    } catch {
+      setAuthFiles([]);
+      setAuthFilesLoaded(false);
+    }
+  }, [connectionStatus]);
+
+  useEffect(() => {
+    void loadAuthFiles();
+  }, [loadAuthFiles]);
 
   const applyBackendResponse = useCallback((response: AccountInspectionScheduleResponse) => {
     applyBackendInspectionResponse(response, {
@@ -784,8 +916,9 @@ export function AccountInspectionPage() {
     ) {
       refreshedBackendFinishedAtRef.current = response.status.lastFinishedAt;
       quotaPersistenceMiddleware.markStale(response.status.lastFinishedAt);
+      void loadAuthFiles();
     }
-  }, []);
+  }, [loadAuthFiles]);
 
   const loadBackendSchedule = useCallback(async () => {
     if (connectionStatus !== 'connected') return;
@@ -1014,11 +1147,12 @@ export function AccountInspectionPage() {
         }
         const nextResult = applyAccountInspectionExecutionResult(currentResult, execution);
         setResult(nextResult);
+        void loadAuthFiles();
       } finally {
         setExecuting(false);
       }
     },
-    [appendLog, result, showNotification, t]
+    [appendLog, loadAuthFiles, result, showNotification, t]
   );
 
   const allResults = useMemo(
@@ -1099,63 +1233,60 @@ export function AccountInspectionPage() {
     [executeItems, showConfirmation, t]
   );
 
+  const authFileStats = useMemo(
+    () => buildAuthFileAccountStats(authFiles, quotaStore),
+    [authFiles, quotaStore]
+  );
+
   const accountSummaryCards = useMemo<SummaryCard[]>(() => {
-    if (!result) {
+    if (!authFilesLoaded) {
       return [
-        { key: 'total', label: t('monitoring.account_inspection_total_accounts'), value: '--' },
-        { key: 'healthy', label: t('monitoring.account_inspection_health_healthy'), value: '--' },
-        { key: 'disabled', label: t('monitoring.account_inspection_health_disabled'), value: '--' },
-        { key: 'authInvalid', label: t('monitoring.account_inspection_health_auth_invalid'), value: '--' },
-        { key: 'quotaExhausted', label: t('monitoring.account_inspection_health_quota_exhausted'), value: '--' },
-        { key: 'inspectionError', label: t('monitoring.account_inspection_health_inspection_error'), value: '--' },
-        { key: 'recoverable', label: t('monitoring.account_inspection_health_recoverable'), value: '--' },
+        { key: 'total', label: t('monitoring.account_inspection_account_total'), value: '--' },
+        { key: 'providers', label: t('monitoring.account_inspection_provider_count'), value: '--' },
+        { key: 'enabled', label: t('monitoring.account_inspection_account_enabled'), value: '--' },
+        { key: 'disabled', label: t('monitoring.account_inspection_account_disabled'), value: '--' },
+        { key: 'quotaLow', label: t('monitoring.account_inspection_account_quota_low'), value: '--' },
+        { key: 'abnormal', label: t('monitoring.account_inspection_account_abnormal'), value: '--' },
       ];
     }
 
     return [
       {
         key: 'total',
-        label: t('monitoring.account_inspection_total_accounts'),
-        value: String(healthCounts.total || result.summary.probeSetCount),
+        label: t('monitoring.account_inspection_account_total'),
+        value: String(authFileStats.total),
       },
       {
-        key: 'healthy',
-        label: t('monitoring.account_inspection_health_healthy'),
-        value: String(healthCounts.healthy),
-        tone: healthCounts.healthy > 0 ? 'good' : 'neutral',
+        key: 'providers',
+        label: t('monitoring.account_inspection_provider_count'),
+        value: String(authFileStats.providerCount),
+      },
+      {
+        key: 'enabled',
+        label: t('monitoring.account_inspection_account_enabled'),
+        value: String(authFileStats.enabled),
+        tone: authFileStats.enabled > 0 ? 'good' : 'neutral',
       },
       {
         key: 'disabled',
-        label: t('monitoring.account_inspection_health_disabled'),
-        value: String(healthCounts.disabled),
-        tone: healthCounts.disabled > 0 ? 'warn' : 'neutral',
+        label: t('monitoring.account_inspection_account_disabled'),
+        value: String(authFileStats.disabled),
+        tone: authFileStats.disabled > 0 ? 'warn' : 'neutral',
       },
       {
-        key: 'authInvalid',
-        label: t('monitoring.account_inspection_health_auth_invalid'),
-        value: String(healthCounts.authInvalid),
-        tone: healthCounts.authInvalid > 0 ? 'bad' : 'neutral',
+        key: 'quotaLow',
+        label: t('monitoring.account_inspection_account_quota_low'),
+        value: String(authFileStats.quotaLow),
+        tone: authFileStats.quotaLow > 0 ? 'warn' : 'neutral',
       },
       {
-        key: 'quotaExhausted',
-        label: t('monitoring.account_inspection_health_quota_exhausted'),
-        value: String(healthCounts.quotaExhausted),
-        tone: healthCounts.quotaExhausted > 0 ? 'warn' : 'neutral',
-      },
-      {
-        key: 'inspectionError',
-        label: t('monitoring.account_inspection_health_inspection_error'),
-        value: String(healthCounts.inspectionError),
-        tone: healthCounts.inspectionError > 0 ? 'bad' : 'neutral',
-      },
-      {
-        key: 'recoverable',
-        label: t('monitoring.account_inspection_health_recoverable'),
-        value: String(healthCounts.recoverable),
-        tone: healthCounts.recoverable > 0 ? 'good' : 'neutral',
+        key: 'abnormal',
+        label: t('monitoring.account_inspection_account_abnormal'),
+        value: String(authFileStats.abnormal),
+        tone: authFileStats.abnormal > 0 ? 'bad' : 'neutral',
       },
     ];
-  }, [healthCounts, result, t]);
+  }, [authFileStats, authFilesLoaded, t]);
 
   const inspectionSummaryCards = useMemo<SummaryCard[]>(() => {
     const summarySource =
@@ -1442,38 +1573,18 @@ export function AccountInspectionPage() {
 
         <div className={styles.metaRow}>
           <span className={styles.metaPill}>{`${t('monitoring.account_inspection_target_type')}: ${inspectionSettings.targetType}`}</span>
-          <span className={styles.metaPill}>{`${t('monitoring.account_inspection_threshold')}: ${inspectionSettings.usedPercentThreshold}%`}</span>
-          <span className={styles.metaPill}>{`${t('monitoring.account_inspection_workers')}: ${inspectionSettings.workers}`}</span>
-          <span className={styles.metaPill}>{`${t('monitoring.account_inspection_delete_workers')}: ${inspectionSettings.deleteWorkers}`}</span>
-          <span className={styles.metaPill}>{`${t('monitoring.account_inspection_sample_size')}: ${inspectionSettings.sampleSize}`}</span>
-          <span className={styles.metaPill}>
-            {`${t('monitoring.account_inspection_settings_auto_execute_quota_limit_disable_label')}: ${
-              inspectionSettings.autoExecuteQuotaLimitDisable ? t('common.yes') : t('common.no')
-            }`}
-          </span>
-          <span className={styles.metaPill}>
-            {`${t('monitoring.account_inspection_settings_auto_execute_quota_recovery_enable_label')}: ${
-              inspectionSettings.autoExecuteQuotaRecoveryEnable ? t('common.yes') : t('common.no')
-            }`}
-          </span>
-          <span className={styles.metaPill}>
-            {`${t('monitoring.account_inspection_settings_auto_execute_account_error_action_label')}: ${
-              t(`monitoring.account_inspection_settings_account_error_action_${inspectionSettings.autoExecuteAccountErrorAction}`)
-            }`}
-          </span>
           <span className={styles.metaPill}>
             {`${t('monitoring.account_inspection_schedule_status')}: ${
               scheduleResponse?.schedule.enabled ? t('common.yes') : t('common.no')
             }`}
           </span>
-          {scheduleResponse?.schedule.enabled ? (
-            <span className={styles.metaPill}>
-              {`${t('monitoring.account_inspection_schedule_next_run')}: ${
-                scheduleResponse.schedule.nextRunAt ? formatTimestamp(scheduleResponse.schedule.nextRunAt, i18n.language) : '--'
-              }`}
-            </span>
-          ) : null}
-          <span className={styles.metaPill}>{`${t('monitoring.account_inspection_timeout')}: ${inspectionSettings.timeout}ms`}</span>
+          <span className={styles.metaPill}>
+            {`${t('monitoring.account_inspection_schedule_next_run')}: ${
+              scheduleResponse?.schedule.enabled && scheduleResponse.schedule.nextRunAt
+                ? formatTimestamp(scheduleResponse.schedule.nextRunAt, i18n.language)
+                : '--'
+            }`}
+          </span>
         </div>
 
         <div className={styles.progressSection}>
