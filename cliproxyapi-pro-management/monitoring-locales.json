@@ -342,7 +342,10 @@
       "account_inspection_account_enabled": "Enabled",
       "account_inspection_account_disabled": "Disabled",
       "account_inspection_account_quota_low": "Quota Low",
-      "account_inspection_account_abnormal": "Account Issues"
+      "account_inspection_account_abnormal": "Account Issues",
+      "focus_api_key": "Focus API Key",
+      "focus_model": "Focus Model",
+      "focused_scope_label": "Focused"
     },
     "usage_stats": {
       "title": "Usage Statistics",
@@ -794,7 +797,10 @@
       "account_inspection_account_enabled": "Включены",
       "account_inspection_account_disabled": "Отключены",
       "account_inspection_account_quota_low": "Квота мала",
-      "account_inspection_account_abnormal": "Проблемы аккаунтов"
+      "account_inspection_account_abnormal": "Проблемы аккаунтов",
+      "focus_api_key": "Фокус на API-ключе",
+      "focus_model": "Фокус на модели",
+      "focused_scope_label": "Фокус"
     },
     "usage_stats": {
       "title": "Статистика использования",
@@ -1246,7 +1252,10 @@
       "account_inspection_account_enabled": "启用中",
       "account_inspection_account_disabled": "禁用中",
       "account_inspection_account_quota_low": "额度不足",
-      "account_inspection_account_abnormal": "账号异常"
+      "account_inspection_account_abnormal": "账号异常",
+      "focus_api_key": "聚焦 API 密钥",
+      "focus_model": "聚焦模型",
+      "focused_scope_label": "已聚焦"
     },
     "usage_stats": {
       "title": "使用统计",
@@ -1692,7 +1701,10 @@
       "account_inspection_account_enabled": "啟用中",
       "account_inspection_account_disabled": "停用中",
       "account_inspection_account_quota_low": "額度不足",
-      "account_inspection_account_abnormal": "帳號異常"
+      "account_inspection_account_abnormal": "帳號異常",
+      "focus_api_key": "聚焦 API 金鑰",
+      "focus_model": "聚焦模型",
+      "focused_scope_label": "已聚焦"
     },
     "usage_stats": {
       "title": "使用統計",

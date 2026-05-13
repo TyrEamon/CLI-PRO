@@ -92,13 +92,9 @@ type SummaryCardProps = {
   tone?: MonitoringStatusTone;
 };
 
-type FocusSnapshot = {
-  searchInput: string;
-  selectedAccount: string;
-  selectedProvider: string;
-  selectedModel: string;
-  selectedChannel: string;
-  selectedStatus: StatusFilter;
+type FocusScope = {
+  type: MonitoringAccountGroupBy;
+  value: string;
 };
 
 type PriceDraft = {
@@ -147,6 +143,12 @@ const buildAccountSecondaryText = (row: MonitoringAccountRow) => {
     return joinShort(row.channels, 2);
   }
   return '';
+};
+
+const getFocusActionLabel = (row: MonitoringAccountRow, t: TFunction) => {
+  if (row.group === 'apiKey') return t('monitoring.focus_api_key');
+  if (row.group === 'model') return t('monitoring.focus_model');
+  return t('monitoring.focus_account');
 };
 
 const buildAccountSummaryMetrics = (
@@ -679,11 +681,9 @@ function ExpandedAccountCard({
           </div>
         ))}
         <div className={styles.expandedAccountAction}>
-          {row.group === 'account' ? (
-            <button type="button" className={styles.inlineActionButton} onClick={onFocus}>
-              {isFocused ? t('monitoring.restore_account_scope') : t('monitoring.focus_account')}
-            </button>
-          ) : null}
+          <button type="button" className={styles.inlineActionButton} onClick={onFocus}>
+            {isFocused ? t('monitoring.restore_account_scope') : getFocusActionLabel(row, t)}
+          </button>
         </div>
       </div>
 
@@ -719,7 +719,7 @@ export function MonitoringCenterPage() {
   const [selectedStatus, setSelectedStatus] = useState<StatusFilter>('all');
   const [accountGroupBy, setAccountGroupBy] = useState<MonitoringAccountGroupBy>('account');
   const [expandedAccounts, setExpandedAccounts] = useState<Record<string, boolean>>({});
-  const [focusedAccount, setFocusedAccount] = useState<string | null>(null);
+  const [focusScope, setFocusScope] = useState<FocusScope | null>(null);
   const [isPriceModalOpen, setIsPriceModalOpen] = useState(false);
   const [priceModel, setPriceModel] = useState('');
   const [priceDraft, setPriceDraft] = useState<PriceDraft>(() => createPriceDraft());
@@ -727,7 +727,6 @@ export function MonitoringCenterPage() {
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [accountQuotaStates, setAccountQuotaStates] = useState<Record<string, AccountQuotaState>>({});
   const [accountSort, setAccountSort] = useState<AccountSortState>(DEFAULT_ACCOUNT_SORT);
-  const focusSnapshotRef = useRef<FocusSnapshot | null>(null);
   const accountQuotaStatesRef = useRef<Record<string, AccountQuotaState>>({});
   const accountQuotaRequestIdsRef = useRef<Record<string, number>>({});
   const deferredSearch = useDeferredValue(searchInput);
@@ -959,7 +958,18 @@ export function MonitoringCenterPage() {
       }),
     [filteredRows, selectedAccount, selectedChannel, selectedModel, selectedProvider, selectedStatus]
   );
-  const scopedStatsRows = useMemo(() => scopedRows.filter((row) => row.statsIncluded), [scopedRows]);
+  const focusedRows = useMemo(
+    () =>
+      focusScope
+        ? scopedRows.filter((row) => {
+            if (focusScope.type === 'account') return row.account === focusScope.value;
+            if (focusScope.type === 'apiKey') return row.clientApiKeyId === focusScope.value;
+            return row.model === focusScope.value;
+          })
+        : scopedRows,
+    [focusScope, scopedRows]
+  );
+  const scopedStatsRows = useMemo(() => focusedRows.filter((row) => row.statsIncluded), [focusedRows]);
 
   const scopedSummary = useMemo(() => buildMonitoringSummary(scopedStatsRows), [scopedStatsRows]);
   const accountRows = useMemo(() => buildAccountRows(scopedRows, accountGroupBy), [accountGroupBy, scopedRows]);
@@ -975,7 +985,7 @@ export function MonitoringCenterPage() {
       return compareAccountRowsByDefault(left, right);
     });
   }, [accountRows, accountSort]);
-  const realtimeLogRows = useMemo(() => buildRealtimeLogRows(scopedRows), [scopedRows]);
+  const realtimeLogRows = useMemo(() => buildRealtimeLogRows(focusedRows), [focusedRows]);
 
   const accountQuotaTargetsByAccount = useMemo(() => {
     const grouped = new Map<string, Map<string, AccountQuotaTarget>>();
@@ -1027,7 +1037,8 @@ export function MonitoringCenterPage() {
       ])
     );
   }, [accountQuotaTargetsByAccount, quotaStore, t]);
-  const scopedFailureCount = scopedRows.filter((row) => row.failed).length;
+  const activeScopeRows = focusedRows;
+  const scopedFailureCount = activeScopeRows.filter((row) => row.failed).length;
   const savedPriceEntries = useMemo(
     () => Object.entries(modelPrices).sort((left, right) => left[0].localeCompare(right[0])),
     [modelPrices]
@@ -1036,7 +1047,7 @@ export function MonitoringCenterPage() {
   const selectedFiltersCount =
     [selectedAccount, selectedProvider, selectedModel, selectedChannel, selectedStatus].filter(
       (value) => value !== 'all'
-    ).length + (deferredSearch.trim() ? 1 : 0);
+    ).length + (deferredSearch.trim() ? 1 : 0) + (focusScope ? 1 : 0);
 
   const accountOverviewColumns = useMemo<AccountOverviewColumn[]>(
     () => [
@@ -1065,7 +1076,7 @@ export function MonitoringCenterPage() {
     {
       label: t('monitoring.total_calls'),
       value: formatCompactNumber(scopedSummary.totalCalls),
-      meta: `${accountRows.length} ${accountGroupBy === 'apiKey' ? t('monitoring.api_keys_suffix') : accountGroupBy === 'model' ? t('monitoring.models_suffix') : t('monitoring.accounts_suffix')}`,
+      meta: `${accountRows.length} ${accountGroupBy === 'apiKey' ? t('monitoring.api_keys_suffix') : accountGroupBy === 'model' ? t('monitoring.models_suffix') : t('monitoring.accounts_suffix')}${focusScope ? ` · ${t('monitoring.focused_scope_label')}: ${activeScopeRows.length}` : ''}`,
     },
     {
       label: t('monitoring.success_calls'),
@@ -1111,27 +1122,32 @@ export function MonitoringCenterPage() {
     },
   ];
 
-  const restoreFocusSnapshot = useCallback(() => {
-    const snapshot = focusSnapshotRef.current;
-    focusSnapshotRef.current = null;
-    setFocusedAccount(null);
+  const clearFocusScope = useCallback(() => {
+    setFocusScope(null);
+  }, []);
 
-    if (!snapshot) {
-      setSelectedAccount('all');
+  const focusAccountRow = useCallback((row: MonitoringAccountRow) => {
+    if (row.group === 'account') {
+      setFocusScope((previous) =>
+        previous?.type === 'account' && previous.value === row.account ? null : { type: 'account', value: row.account }
+      );
       return;
     }
 
-    setSearchInput(snapshot.searchInput);
-    setSelectedAccount(snapshot.selectedAccount);
-    setSelectedProvider(snapshot.selectedProvider);
-    setSelectedModel(snapshot.selectedModel);
-    setSelectedChannel(snapshot.selectedChannel);
-    setSelectedStatus(snapshot.selectedStatus);
+    if (row.group === 'apiKey') {
+      setFocusScope((previous) =>
+        previous?.type === 'apiKey' && previous.value === row.id ? null : { type: 'apiKey', value: row.id }
+      );
+      return;
+    }
+
+    setFocusScope((previous) =>
+      previous?.type === 'model' && previous.value === row.model ? null : { type: 'model', value: row.model }
+    );
   }, []);
 
   const clearFilters = useCallback(() => {
-    focusSnapshotRef.current = null;
-    setFocusedAccount(null);
+    setFocusScope(null);
     setSearchInput('');
     setSelectedAccount('all');
     setSelectedProvider('all');
@@ -1226,50 +1242,9 @@ export function MonitoringCenterPage() {
     }));
   }, [expandedAccounts, loadAccountQuota]);
 
-  const focusAccount = useCallback(
-    (account: string) => {
-      if (focusedAccount === account) {
-        restoreFocusSnapshot();
-        return;
-      }
-
-      if (!focusSnapshotRef.current) {
-        focusSnapshotRef.current = {
-          searchInput,
-          selectedAccount,
-          selectedProvider,
-          selectedModel,
-          selectedChannel,
-          selectedStatus,
-        };
-      }
-
-      setFocusedAccount(account);
-      setSelectedAccount(account);
-    },
-    [
-      focusedAccount,
-      restoreFocusSnapshot,
-      searchInput,
-      selectedAccount,
-      selectedChannel,
-      selectedModel,
-      selectedProvider,
-      selectedStatus,
-    ]
-  );
-
-  const handleAccountFilterChange = useCallback(
-    (value: string) => {
-      setSelectedAccount(value);
-
-      if (focusedAccount && value !== focusedAccount) {
-        focusSnapshotRef.current = null;
-        setFocusedAccount(null);
-      }
-    },
-    [focusedAccount]
-  );
+  const handleAccountFilterChange = useCallback((value: string) => {
+    setSelectedAccount(value);
+  }, []);
 
   const handleAccountSort = useCallback((key: AccountSortKey) => {
     setAccountSort((previous) =>
@@ -1391,7 +1366,7 @@ export function MonitoringCenterPage() {
         title={t('monitoring.toolbar_title')}
         subtitle={
           selectedFiltersCount > 0
-            ? t('monitoring.active_filters_hint', { count: selectedFiltersCount, rows: scopedRows.length })
+            ? t('monitoring.active_filters_hint', { count: selectedFiltersCount, rows: activeScopeRows.length })
             : t('monitoring.realtime_table_desc')
         }
         className={styles.toolbarPanel}
@@ -1518,6 +1493,7 @@ export function MonitoringCenterPage() {
               onChange={(value) => {
                 setAccountGroupBy(value as MonitoringAccountGroupBy);
                 setExpandedAccounts({});
+                clearFocusScope();
               }}
               ariaLabel={t('monitoring.account_group_by')}
             />
@@ -1573,7 +1549,7 @@ export function MonitoringCenterPage() {
             <tbody>
               {sortedAccountRows.map((row) => {
                 const isExpanded = Boolean(expandedAccounts[row.id]);
-                const isFocused = row.group === 'account' && focusedAccount === row.account;
+                const isFocused = focusScope?.type === row.group && focusScope.value === (row.group === 'account' ? row.account : row.group === 'apiKey' ? row.id : row.model);
                 const summaryMetrics = buildAccountSummaryMetrics(row, hasPrices, i18n.language, t);
 
                 if (isExpanded) {
@@ -1590,7 +1566,7 @@ export function MonitoringCenterPage() {
                           quotaState={row.group === 'account' ? accountQuotaStates[row.account] : undefined}
                           quotaEntries={row.group === 'account' ? accountQuotaEntriesByAccount.get(row.account) ?? [] : []}
                           onToggle={() => toggleAccountExpanded(row.id, row.group === 'account' ? row.account : '')}
-                          onFocus={() => focusAccount(row.account)}
+                          onFocus={() => focusAccountRow(row)}
                           onRefreshQuota={() => void loadAccountQuota(row.account, true)}
                         />
                       </td>
@@ -1613,15 +1589,13 @@ export function MonitoringCenterPage() {
                       </td>
                     ))}
                     <td>
-                      {row.group === 'account' ? (
-                        <button
-                          type="button"
-                          className={styles.inlineActionButton}
-                          onClick={() => focusAccount(row.account)}
-                        >
-                          {isFocused ? t('monitoring.restore_account_scope') : t('monitoring.focus_account')}
-                        </button>
-                      ) : null}
+                      <button
+                        type="button"
+                        className={styles.inlineActionButton}
+                        onClick={() => focusAccountRow(row)}
+                      >
+                        {isFocused ? t('monitoring.restore_account_scope') : getFocusActionLabel(row, t)}
+                      </button>
                     </td>
                   </tr>
                 );
