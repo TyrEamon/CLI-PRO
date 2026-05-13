@@ -57,7 +57,6 @@ export type AccountInspectionLogStreamMessage = {
   schedule: AccountInspectionSchedule;
   status: AccountInspectionBackendStatus;
   log?: AccountInspectionBackendLog;
-  logs?: AccountInspectionBackendLog[];
 };
 
 export type AccountInspectionActionOutcome = {

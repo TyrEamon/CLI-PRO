@@ -45,6 +45,20 @@ import styles from './AccountInspectionPage.module.scss';
 
 type RunStatus = 'idle' | 'running' | 'paused' | 'success' | 'error';
 
+type ResultHealthStatus = 'healthy' | 'disabled' | 'authInvalid' | 'quotaExhausted' | 'inspectionError' | 'recoverable' | 'processed';
+
+type ResultFilter = 'all' | 'pending' | 'authInvalid' | 'quotaExhausted' | 'inspectionError' | 'recoverable' | 'processed';
+
+type HealthCounts = {
+  total: number;
+  healthy: number;
+  disabled: number;
+  authInvalid: number;
+  quotaExhausted: number;
+  inspectionError: number;
+  recoverable: number;
+};
+
 type InspectionLogEntry = {
   id: string;
   level: AccountInspectionLogLevel;
@@ -113,6 +127,11 @@ const crcTable = Array.from({ length: 256 }, (_, index) => {
   }
   return value >>> 0;
 });
+
+const ACCOUNT_INSPECTION_LOG_LIMIT = 200;
+
+const appendInspectionLogEntry = (entries: InspectionLogEntry[], entry: InspectionLogEntry) =>
+  [...entries, entry].slice(-ACCOUNT_INSPECTION_LOG_LIMIT);
 
 const emptyAutoExecutionCounts = (): AutoExecutionCounts => ({
   delete: 0,
@@ -302,6 +321,77 @@ const levelClassMap: Record<AccountInspectionLogLevel, string> = {
   error: styles.logError,
 };
 
+const healthToneClass: Record<ResultHealthStatus, string> = {
+  healthy: styles.healthHealthy,
+  disabled: styles.healthDisabled,
+  authInvalid: styles.healthAuthInvalid,
+  quotaExhausted: styles.healthQuota,
+  inspectionError: styles.healthError,
+  recoverable: styles.healthRecoverable,
+  processed: styles.healthProcessed,
+};
+
+const healthLabelKey: Record<ResultHealthStatus, string> = {
+  healthy: 'monitoring.account_inspection_health_healthy',
+  disabled: 'monitoring.account_inspection_health_disabled',
+  authInvalid: 'monitoring.account_inspection_health_auth_invalid',
+  quotaExhausted: 'monitoring.account_inspection_health_quota_exhausted',
+  inspectionError: 'monitoring.account_inspection_health_inspection_error',
+  recoverable: 'monitoring.account_inspection_health_recoverable',
+  processed: 'monitoring.account_inspection_health_processed',
+};
+
+const resolveResultHealthStatus = (item: AccountInspectionResultItem): ResultHealthStatus => {
+  if (item.executed) return 'processed';
+  if (item.error) return 'inspectionError';
+  if (item.action === 'delete' || (item.statusCode !== null && [400, 401, 403, 404].includes(item.statusCode))) {
+    return 'authInvalid';
+  }
+  if (item.isQuota || item.action === 'disable') return 'quotaExhausted';
+  if (item.action === 'enable') return 'recoverable';
+  if (item.disabled) return 'disabled';
+  return 'healthy';
+};
+
+const emptyHealthCounts = (): HealthCounts => ({
+  total: 0,
+  healthy: 0,
+  disabled: 0,
+  authInvalid: 0,
+  quotaExhausted: 0,
+  inspectionError: 0,
+  recoverable: 0,
+});
+
+const countHealthStatuses = (items: AccountInspectionResultItem[]): HealthCounts => {
+  const counts = emptyHealthCounts();
+  counts.total = items.length;
+  items.forEach((item) => {
+    switch (resolveResultHealthStatus(item)) {
+      case 'healthy':
+      case 'processed':
+        counts.healthy += 1;
+        break;
+      case 'disabled':
+        counts.disabled += 1;
+        break;
+      case 'authInvalid':
+        counts.authInvalid += 1;
+        break;
+      case 'quotaExhausted':
+        counts.quotaExhausted += 1;
+        break;
+      case 'inspectionError':
+        counts.inspectionError += 1;
+        break;
+      case 'recoverable':
+        counts.recoverable += 1;
+        break;
+    }
+  });
+  return counts;
+};
+
 const summaryToneClass: Record<NonNullable<SummaryCard['tone']>, string> = {
   neutral: '',
   good: styles.summaryGood,
@@ -370,6 +460,12 @@ const formatCurrentStateLabel = (item: AccountInspectionResultItem, t: ReturnTyp
   return t('monitoring.account_inspection_state_enabled');
 };
 
+const formatRunInspectionButtonLabel = (status: RunStatus, t: ReturnType<typeof useTranslation>['t']) => {
+  if (status === 'paused') return t('monitoring.account_inspection_resume');
+  if (status === 'running') return t('monitoring.account_inspection_running');
+  return t('monitoring.account_inspection_run');
+};
+
 const countActions = (items: AccountInspectionResultItem[]) => {
   const summary = {
     delete: 0,
@@ -436,6 +532,7 @@ const backendResultToFrontendItem = (
   usedPercent: item.usedPercent ?? null,
   isQuota: item.isQuota,
   error: item.executeError || item.error || '',
+  executed: item.executed,
 });
 
 const backendProgressStatus = (status: AccountInspectionScheduleResponse['status']): AccountInspectionProgressSnapshot['status'] => {
@@ -478,6 +575,45 @@ const sameProgressSnapshot = (left: AccountInspectionProgressSnapshot, right: Ac
   left.summary.enableCount === right.summary.enableCount &&
   left.summary.keepCount === right.summary.keepCount &&
   left.summary.errorCount === right.summary.errorCount;
+
+const sameInspectionSettings = (left: AccountInspectionConfigurableSettings, right: AccountInspectionConfigurableSettings) =>
+  left.targetType === right.targetType &&
+  left.workers === right.workers &&
+  left.deleteWorkers === right.deleteWorkers &&
+  left.timeout === right.timeout &&
+  left.retries === right.retries &&
+  left.usedPercentThreshold === right.usedPercentThreshold &&
+  left.sampleSize === right.sampleSize &&
+  left.autoExecuteQuotaLimitDisable === right.autoExecuteQuotaLimitDisable &&
+  left.autoExecuteQuotaRecoveryEnable === right.autoExecuteQuotaRecoveryEnable &&
+  left.autoExecuteAccountErrorAction === right.autoExecuteAccountErrorAction;
+
+const sameSettingsDraft = (left: InspectionSettingsDraft, right: InspectionSettingsDraft) =>
+  left.targetType === right.targetType &&
+  left.workers === right.workers &&
+  left.deleteWorkers === right.deleteWorkers &&
+  left.timeout === right.timeout &&
+  left.retries === right.retries &&
+  left.usedPercentThreshold === right.usedPercentThreshold &&
+  left.sampleSize === right.sampleSize &&
+  left.autoExecuteQuotaLimitDisable === right.autoExecuteQuotaLimitDisable &&
+  left.autoExecuteQuotaRecoveryEnable === right.autoExecuteQuotaRecoveryEnable &&
+  left.autoExecuteAccountErrorAction === right.autoExecuteAccountErrorAction;
+
+const sameScheduleDraft = (left: ScheduleDraft, right: ScheduleDraft) =>
+  left.enabled === right.enabled && left.intervalMinutes === right.intervalMinutes;
+
+const sameScheduleResponse = (
+  left: AccountInspectionScheduleResponse | null,
+  right: AccountInspectionScheduleResponse | null
+) => {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return left.schedule.enabled === right.schedule.enabled &&
+    left.schedule.intervalMinutes === right.schedule.intervalMinutes &&
+    left.schedule.nextRunAt === right.schedule.nextRunAt &&
+    sameInspectionSettings(left.schedule.settings, right.schedule.settings);
+};
 
 const sameAutoExecutionCounts = (left: AutoExecutionCounts, right: AutoExecutionCounts) =>
   left.delete === right.delete && left.disable === right.disable && left.enable === right.enable;
@@ -607,6 +743,8 @@ export function AccountInspectionPage() {
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [logs, setLogs] = useState<InspectionLogEntry[]>([]);
   const [logsCollapsed, setLogsCollapsed] = useState(false);
+  const [resultFilter, setResultFilter] = useState<ResultFilter>('pending');
+  const [logLevelFilter, setLogLevelFilter] = useState<AccountInspectionLogLevel | 'all'>('all');
   const [runStatus, setRunStatus] = useState<RunStatus>('idle');
   const [progress, setProgress] = useState<AccountInspectionProgressSnapshot>(createIdleProgressSnapshot);
   const [result, setResult] = useState<AccountInspectionRunResult | null>(null);
@@ -626,10 +764,10 @@ export function AccountInspectionPage() {
 
   const applyBackendResponse = useCallback((response: AccountInspectionScheduleResponse) => {
     applyBackendInspectionResponse(response, {
-      setInspectionSettings,
-      setSettingsDraft,
-      setScheduleDraft,
-      setScheduleResponse,
+      setInspectionSettings: applyIfChanged(setInspectionSettings, sameInspectionSettings),
+      setSettingsDraft: applyIfChanged(setSettingsDraft, sameSettingsDraft),
+      setScheduleDraft: applyIfChanged(setScheduleDraft, sameScheduleDraft),
+      setScheduleResponse: applyIfChanged(setScheduleResponse, sameScheduleResponse),
       setAutoExecutionCounts: applyIfChanged(setAutoExecutionCounts, sameAutoExecutionCounts),
       setLogs,
       setResult,
@@ -682,15 +820,15 @@ export function AccountInspectionPage() {
       try {
         const message = JSON.parse(event.data) as AccountInspectionLogStreamMessage;
         if (message.log) {
-          setLogs((previous) => [
-            ...previous,
-            {
-              id: `backend-${message.log!.time}-${previous.length}`,
-              level: message.log!.level,
-              message: message.log!.message,
-              timestamp: message.log!.time,
-            },
-          ]);
+          setLogs((previous) => appendInspectionLogEntry(previous, {
+            id: `backend-${message.log!.time}-${previous.length}`,
+            level: message.log!.level,
+            message: message.log!.message,
+            timestamp: message.log!.time,
+          }));
+          if (message.type === 'log') {
+            return;
+          }
         }
         applyBackendResponse({
           schedule: message.schedule,
@@ -708,15 +846,12 @@ export function AccountInspectionPage() {
   }, [apiBase, applyBackendResponse, connectionStatus, managementKey]);
 
   const appendLog = useCallback((level: AccountInspectionLogLevel, message: string) => {
-    setLogs((previous) => [
-      ...previous,
-      {
-        id: `${Date.now()}-${previous.length}`,
-        level,
-        message,
-        timestamp: Date.now(),
-      },
-    ]);
+    setLogs((previous) => appendInspectionLogEntry(previous, {
+      id: `${Date.now()}-${previous.length}`,
+      level,
+      message,
+      timestamp: Date.now(),
+    }));
   }, []);
 
   useEffect(() => {
@@ -886,9 +1021,44 @@ export function AccountInspectionPage() {
     [appendLog, result, showNotification, t]
   );
 
-  const actionableResults = useMemo(
-    () => (result ? result.results.filter(isSuggestedAction) : []),
+  const allResults = useMemo(
+    () => (result ? result.results : []),
     [result]
+  );
+
+  const actionableResults = useMemo(
+    () => allResults.filter(isSuggestedAction),
+    [allResults]
+  );
+
+  const healthCounts = useMemo(
+    () => countHealthStatuses(allResults),
+    [allResults]
+  );
+
+  const filteredResults = useMemo(() => {
+    switch (resultFilter) {
+      case 'all':
+        return allResults;
+      case 'authInvalid':
+        return allResults.filter((item) => resolveResultHealthStatus(item) === 'authInvalid');
+      case 'quotaExhausted':
+        return allResults.filter((item) => resolveResultHealthStatus(item) === 'quotaExhausted');
+      case 'inspectionError':
+        return allResults.filter((item) => resolveResultHealthStatus(item) === 'inspectionError');
+      case 'recoverable':
+        return allResults.filter((item) => resolveResultHealthStatus(item) === 'recoverable');
+      case 'processed':
+        return allResults.filter((item) => item.executed || !isSuggestedAction(item));
+      case 'pending':
+      default:
+        return actionableResults;
+    }
+  }, [actionableResults, allResults, resultFilter]);
+
+  const filteredLogs = useMemo(
+    () => (logLevelFilter === 'all' ? logs : logs.filter((entry) => entry.level === logLevelFilter)),
+    [logLevelFilter, logs]
   );
 
   const handleExecutePlanned = useCallback(() => {
@@ -930,16 +1100,15 @@ export function AccountInspectionPage() {
   );
 
   const accountSummaryCards = useMemo<SummaryCard[]>(() => {
-    const summarySource =
-      result?.summary ?? (runStatus === 'running' || runStatus === 'paused' ? progress.summary : null);
-
-    if (!summarySource) {
+    if (!result) {
       return [
         { key: 'total', label: t('monitoring.account_inspection_total_accounts'), value: '--' },
-        { key: 'sampled', label: t('monitoring.account_inspection_sampled_accounts'), value: '--' },
-        { key: 'enabled', label: t('monitoring.account_inspection_enabled_current_count'), value: '--' },
-        { key: 'disabled', label: t('monitoring.account_inspection_disabled_current_count'), value: '--' },
-        { key: 'errors', label: t('monitoring.account_inspection_error_count'), value: '--' },
+        { key: 'healthy', label: t('monitoring.account_inspection_health_healthy'), value: '--' },
+        { key: 'disabled', label: t('monitoring.account_inspection_health_disabled'), value: '--' },
+        { key: 'authInvalid', label: t('monitoring.account_inspection_health_auth_invalid'), value: '--' },
+        { key: 'quotaExhausted', label: t('monitoring.account_inspection_health_quota_exhausted'), value: '--' },
+        { key: 'inspectionError', label: t('monitoring.account_inspection_health_inspection_error'), value: '--' },
+        { key: 'recoverable', label: t('monitoring.account_inspection_health_recoverable'), value: '--' },
       ];
     }
 
@@ -947,35 +1116,48 @@ export function AccountInspectionPage() {
       {
         key: 'total',
         label: t('monitoring.account_inspection_total_accounts'),
-        value: String(summarySource.probeSetCount),
+        value: String(healthCounts.total || result.summary.probeSetCount),
       },
       {
-        key: 'sampled',
-        label: t('monitoring.account_inspection_sampled_accounts'),
-        value: String(summarySource.sampledCount),
-      },
-      {
-        key: 'enabled',
-        label: t('monitoring.account_inspection_enabled_current_count'),
-        value: String(summarySource.enabledCount),
-        tone: summarySource.enabledCount > 0 ? 'good' : 'neutral',
+        key: 'healthy',
+        label: t('monitoring.account_inspection_health_healthy'),
+        value: String(healthCounts.healthy),
+        tone: healthCounts.healthy > 0 ? 'good' : 'neutral',
       },
       {
         key: 'disabled',
-        label: t('monitoring.account_inspection_disabled_current_count'),
-        value: String(summarySource.disabledCount),
-        tone: summarySource.disabledCount > 0 ? 'warn' : 'neutral',
+        label: t('monitoring.account_inspection_health_disabled'),
+        value: String(healthCounts.disabled),
+        tone: healthCounts.disabled > 0 ? 'warn' : 'neutral',
       },
       {
-        key: 'errors',
-        label: t('monitoring.account_inspection_error_count'),
-        value: String(summarySource.errorCount),
-        tone: summarySource.errorCount > 0 ? 'bad' : 'neutral',
+        key: 'authInvalid',
+        label: t('monitoring.account_inspection_health_auth_invalid'),
+        value: String(healthCounts.authInvalid),
+        tone: healthCounts.authInvalid > 0 ? 'bad' : 'neutral',
+      },
+      {
+        key: 'quotaExhausted',
+        label: t('monitoring.account_inspection_health_quota_exhausted'),
+        value: String(healthCounts.quotaExhausted),
+        tone: healthCounts.quotaExhausted > 0 ? 'warn' : 'neutral',
+      },
+      {
+        key: 'inspectionError',
+        label: t('monitoring.account_inspection_health_inspection_error'),
+        value: String(healthCounts.inspectionError),
+        tone: healthCounts.inspectionError > 0 ? 'bad' : 'neutral',
+      },
+      {
+        key: 'recoverable',
+        label: t('monitoring.account_inspection_health_recoverable'),
+        value: String(healthCounts.recoverable),
+        tone: healthCounts.recoverable > 0 ? 'good' : 'neutral',
       },
     ];
-  }, [progress.summary, result, runStatus, t]);
+  }, [healthCounts, result, t]);
 
-  const actionSummaryCards = useMemo<SummaryCard[]>(() => {
+  const inspectionSummaryCards = useMemo<SummaryCard[]>(() => {
     const summarySource =
       result?.summary ?? (runStatus === 'running' || runStatus === 'paused' ? progress.summary : null);
     const hasAutoExecutePolicy = hasAccountInspectionAutoExecutePolicies(inspectionSettings);
@@ -991,9 +1173,11 @@ export function AccountInspectionPage() {
 
     if (!summarySource) {
       return [
+        { key: 'sampled', label: t('monitoring.account_inspection_sampled_accounts'), value: '--' },
         { key: 'delete', label: deleteLabel, value: '--' },
         { key: 'disable', label: disableLabel, value: '--' },
         { key: 'enable', label: enableLabel, value: '--' },
+        { key: 'keep', label: t('monitoring.account_inspection_keep_count'), value: '--' },
       ];
     }
 
@@ -1002,6 +1186,11 @@ export function AccountInspectionPage() {
     const enableCount = hasAutoExecutePolicy ? autoExecutionCounts.enable : summarySource.enableCount;
 
     return [
+      {
+        key: 'sampled',
+        label: t('monitoring.account_inspection_sampled_accounts'),
+        value: String(summarySource.sampledCount),
+      },
       {
         key: 'delete',
         label: deleteLabel,
@@ -1020,10 +1209,30 @@ export function AccountInspectionPage() {
         value: String(enableCount),
         tone: enableCount > 0 ? 'good' : 'neutral',
       },
+      {
+        key: 'keep',
+        label: t('monitoring.account_inspection_keep_count'),
+        value: String(summarySource.keepCount),
+      },
     ];
   }, [autoExecutionCounts, inspectionSettings, progress.summary, result, runStatus, t]);
 
   const pendingActionCount = actionableResults.length;
+  const resultFilterTabs = useMemo<Array<{ key: ResultFilter; label: string; count: number }>>(() => [
+    { key: 'all', label: t('monitoring.account_inspection_filter_all'), count: allResults.length },
+    { key: 'pending', label: t('monitoring.account_inspection_filter_pending'), count: pendingActionCount },
+    { key: 'authInvalid', label: t('monitoring.account_inspection_health_auth_invalid'), count: healthCounts.authInvalid },
+    { key: 'quotaExhausted', label: t('monitoring.account_inspection_health_quota_exhausted'), count: healthCounts.quotaExhausted },
+    { key: 'inspectionError', label: t('monitoring.account_inspection_health_inspection_error'), count: healthCounts.inspectionError },
+    { key: 'recoverable', label: t('monitoring.account_inspection_health_recoverable'), count: healthCounts.recoverable },
+    { key: 'processed', label: t('monitoring.account_inspection_filter_processed'), count: allResults.length - pendingActionCount },
+  ], [allResults.length, healthCounts, pendingActionCount, t]);
+  const logLevelOptions = useMemo<Array<{ key: AccountInspectionLogLevel | 'all'; label: string }>>(() => [
+    { key: 'all', label: t('monitoring.account_inspection_filter_all') },
+    { key: 'success', label: t('monitoring.account_inspection_log_success') },
+    { key: 'warning', label: t('monitoring.account_inspection_log_warning') },
+    { key: 'error', label: t('monitoring.account_inspection_log_error') },
+  ], [t]);
   const progressLabel =
     progress.total > 0
       ? t('monitoring.account_inspection_progress_status', {
@@ -1181,16 +1390,46 @@ export function AccountInspectionPage() {
             <h1 className={styles.heroTitle}>{t('monitoring.account_inspection_title')}</h1>
             <p className={styles.heroSubtitle}>{t('monitoring.account_inspection_desc')}</p>
           </div>
+        </div>
+      </Card>
 
-          <div className={styles.heroActions}>
-            <Button
-              variant="secondary"
-              onClick={handleExportAuthFiles}
-              loading={exportingAuthFiles}
-              disabled={exportingAuthFiles || connectionStatus !== 'connected'}
+      <section className={styles.summarySection}>
+        <div className={styles.summarySectionHeader}>
+          <div>
+            <h2>{t('monitoring.account_inspection_account_summary_title')}</h2>
+            <p>{t('monitoring.account_inspection_account_summary_desc')}</p>
+          </div>
+          <Button
+            variant="secondary"
+            onClick={handleExportAuthFiles}
+            loading={exportingAuthFiles}
+            disabled={exportingAuthFiles || connectionStatus !== 'connected'}
+          >
+            {t('monitoring.account_inspection_auth_files_export')}
+          </Button>
+        </div>
+        <div className={styles.summaryGrid}>
+          {accountSummaryCards.map((card) => (
+            <Card
+              key={card.key}
+              className={[styles.summaryCard, summaryToneClass[card.tone ?? 'neutral']]
+                .filter(Boolean)
+                .join(' ')}
             >
-              {t('monitoring.account_inspection_auth_files_export')}
-            </Button>
+              <span>{card.label}</span>
+              <strong>{card.value}</strong>
+            </Card>
+          ))}
+        </div>
+      </section>
+
+      <Card className={styles.panel}>
+        <div className={styles.panelHeader}>
+          <div>
+            <h2 className={styles.panelTitle}>{t('monitoring.account_inspection_control_title')}</h2>
+            <p className={styles.panelSubtitle}>{t('monitoring.account_inspection_control_desc')}</p>
+          </div>
+          <div className={styles.panelActions}>
             <Button
               variant="secondary"
               onClick={openSettingsModal}
@@ -1236,6 +1475,7 @@ export function AccountInspectionPage() {
           ) : null}
           <span className={styles.metaPill}>{`${t('monitoring.account_inspection_timeout')}: ${inspectionSettings.timeout}ms`}</span>
         </div>
+
         <div className={styles.progressSection}>
           <div className={styles.progressHeader}>
             <strong>{t('monitoring.account_inspection_progress_title')}</strong>
@@ -1256,11 +1496,7 @@ export function AccountInspectionPage() {
                 loading={runStatus === 'running'}
                 disabled={runStatus === 'running' || executing || connectionStatus !== 'connected'}
               >
-                {runStatus === 'paused'
-                  ? t('monitoring.account_inspection_resume')
-                  : runStatus === 'running'
-                    ? t('monitoring.account_inspection_running')
-                    : t('monitoring.account_inspection_run')}
+                {formatRunInspectionButtonLabel(runStatus, t)}
               </Button>
               <Button
                 variant="secondary"
@@ -1283,29 +1519,13 @@ export function AccountInspectionPage() {
 
       <section className={styles.summarySection}>
         <div className={styles.summarySectionHeader}>
-          <h2>{t('monitoring.account_inspection_account_summary_title')}</h2>
-        </div>
-        <div className={styles.summaryGrid}>
-          {accountSummaryCards.map((card) => (
-            <Card
-              key={card.key}
-              className={[styles.summaryCard, summaryToneClass[card.tone ?? 'neutral']]
-                .filter(Boolean)
-                .join(' ')}
-            >
-              <span>{card.label}</span>
-              <strong>{card.value}</strong>
-            </Card>
-          ))}
-        </div>
-      </section>
-
-      <section className={styles.summarySection}>
-        <div className={styles.summarySectionHeader}>
-          <h2>{t('monitoring.account_inspection_action_summary_title')}</h2>
+          <div>
+            <h2>{t('monitoring.account_inspection_inspection_summary_title')}</h2>
+            <p>{t('monitoring.account_inspection_inspection_summary_desc')}</p>
+          </div>
         </div>
         <div className={styles.summaryGridCompact}>
-          {actionSummaryCards.map((card) => (
+          {inspectionSummaryCards.map((card) => (
             <Card
               key={card.key}
               className={[styles.summaryCard, summaryToneClass[card.tone ?? 'neutral']]
@@ -1318,49 +1538,6 @@ export function AccountInspectionPage() {
           ))}
         </div>
       </section>
-
-      <Card className={styles.panel}>
-        <div className={styles.panelHeader}>
-          <div>
-            <h2 className={styles.panelTitle}>{t('monitoring.account_inspection_logs_title')}</h2>
-            <p className={styles.panelSubtitle}>{t('monitoring.account_inspection_logs_desc')}</p>
-          </div>
-          <div className={styles.panelActions}>
-            <button
-              type="button"
-              className={styles.foldButton}
-              onClick={() => setLogsCollapsed((previous) => !previous)}
-              disabled={logs.length === 0}
-            >
-              {logsCollapsed ? <IconChevronDown size={16} /> : <IconChevronUp size={16} />}
-              <span>
-                {logsCollapsed
-                  ? t('monitoring.account_inspection_expand_logs')
-                  : t('monitoring.account_inspection_fold_logs')}
-              </span>
-            </button>
-          </div>
-        </div>
-
-        {!logsCollapsed ? (
-          <div ref={logListRef} className={styles.logList}>
-            {logs.length > 0 ? (
-              logs.map((entry) => (
-                <div key={entry.id} className={`${styles.logRow} ${levelClassMap[entry.level]}`}>
-                  <span className={styles.logTime}>{formatTimestamp(entry.timestamp, i18n.language)}</span>
-                  <span className={styles.logMessage}>{entry.message}</span>
-                </div>
-              ))
-            ) : (
-              <div className={styles.emptyBlock}>{t('monitoring.account_inspection_logs_empty')}</div>
-            )}
-          </div>
-        ) : (
-          <div className={styles.logCollapsedBar}>
-            <span>{t('monitoring.account_inspection_logs_collapsed', { count: logs.length })}</span>
-          </div>
-        )}
-      </Card>
 
       <Card className={styles.panel}>
         <div className={styles.panelHeader}>
@@ -1391,10 +1568,27 @@ export function AccountInspectionPage() {
 
         {result ? (
           <>
+            <div className={styles.filterTabs}>
+              {resultFilterTabs.map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  className={[styles.filterTab, resultFilter === tab.key ? styles.filterTabActive : '']
+                    .filter(Boolean)
+                    .join(' ')}
+                  onClick={() => setResultFilter(tab.key)}
+                >
+                  <span>{tab.label}</span>
+                  <strong>{tab.count}</strong>
+                </button>
+              ))}
+            </div>
+
             <div className={styles.tableWrap}>
               <table className={styles.table}>
                 <colgroup>
                   <col className={styles.accountColumn} />
+                  <col className={styles.healthColumn} />
                   <col className={styles.stateColumn} />
                   <col className={styles.httpColumn} />
                   <col className={styles.usageColumn} />
@@ -1406,6 +1600,7 @@ export function AccountInspectionPage() {
                 <thead>
                   <tr>
                     <th>{t('monitoring.account_label')}</th>
+                    <th>{t('monitoring.account_inspection_health_status')}</th>
                     <th>{t('monitoring.account_inspection_current_state')}</th>
                     <th>{t('monitoring.account_inspection_http_status')}</th>
                     <th>{t('monitoring.account_inspection_used_percent')}</th>
@@ -1416,41 +1611,53 @@ export function AccountInspectionPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {actionableResults.length > 0 ? (
-                    actionableResults.map((item) => (
-                    <tr key={item.key}>
-                      <td>
-                        <div className={styles.primaryCell}>
-                          <span>{formatAccountInspectionIdentity(item)}</span>
-                          <small>{item.provider}</small>
-                        </div>
-                      </td>
-                      <td>{formatCurrentStateLabel(item, t)}</td>
-                      <td>{item.statusCode === null ? '--' : item.statusCode}</td>
-                      <td>{formatPercent(item.usedPercent)}</td>
-                      <td>
-                        <span className={`${styles.actionBadge} ${actionToneClass[item.action]}`}>
-                          {formatActionLabel(item.action, t)}
-                        </span>
-                      </td>
-                      <td>{item.actionReason}</td>
-                      <td className={item.error ? styles.errorText : styles.mutedText}>{item.error || '--'}</td>
-                      <td>
-                        <Button
-                          size="sm"
-                          variant={item.action === 'delete' ? 'danger' : 'secondary'}
-                          onClick={() => handleExecuteSingle(item)}
-                          disabled={runStatus === 'running' || executing}
-                        >
-                          {formatActionLabel(item.action, t)}
-                        </Button>
-                      </td>
-                    </tr>
-                    ))
+                  {filteredResults.length > 0 ? (
+                    filteredResults.map((item) => {
+                      const healthStatus = resolveResultHealthStatus(item);
+                      return (
+                        <tr key={item.key}>
+                          <td>
+                            <div className={styles.primaryCell}>
+                              <span>{formatAccountInspectionIdentity(item)}</span>
+                              <small>{item.provider}</small>
+                            </div>
+                          </td>
+                          <td>
+                            <span className={`${styles.healthBadge} ${healthToneClass[healthStatus]}`}>
+                              {t(healthLabelKey[healthStatus])}
+                            </span>
+                          </td>
+                          <td>{formatCurrentStateLabel(item, t)}</td>
+                          <td>{item.statusCode === null ? '--' : item.statusCode}</td>
+                          <td>{formatPercent(item.usedPercent)}</td>
+                          <td>
+                            <span className={`${styles.actionBadge} ${actionToneClass[item.action]}`}>
+                              {formatActionLabel(item.action, t)}
+                            </span>
+                          </td>
+                          <td>{item.actionReason}</td>
+                          <td className={item.error ? styles.errorText : styles.mutedText}>{item.error || '--'}</td>
+                          <td>
+                            {isSuggestedAction(item) ? (
+                              <Button
+                                size="sm"
+                                variant={item.action === 'delete' ? 'danger' : 'secondary'}
+                                onClick={() => handleExecuteSingle(item)}
+                                disabled={runStatus === 'running' || executing}
+                              >
+                                {formatActionLabel(item.action, t)}
+                              </Button>
+                            ) : (
+                              <span className={styles.mutedText}>--</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
                   ) : (
                     <tr>
-                      <td colSpan={8}>
-                        <div className={styles.emptyBlockSmall}>{t('monitoring.account_inspection_no_pending_actions')}</div>
+                      <td colSpan={9}>
+                        <div className={styles.emptyBlockSmall}>{t('monitoring.account_inspection_no_filtered_results')}</div>
                       </td>
                     </tr>
                   )}
@@ -1460,6 +1667,63 @@ export function AccountInspectionPage() {
           </>
         ) : (
           <div className={styles.emptyBlock}>{t('monitoring.account_inspection_empty')}</div>
+        )}
+      </Card>
+
+      <Card className={styles.panel}>
+        <div className={styles.panelHeader}>
+          <div>
+            <h2 className={styles.panelTitle}>{t('monitoring.account_inspection_logs_title')}</h2>
+            <p className={styles.panelSubtitle}>{t('monitoring.account_inspection_logs_desc')}</p>
+          </div>
+          <div className={styles.panelActions}>
+            <div className={styles.logLevelTabs}>
+              {logLevelOptions.map((option) => (
+                <button
+                  key={option.key}
+                  type="button"
+                  className={[styles.logLevelTab, logLevelFilter === option.key ? styles.logLevelTabActive : '']
+                    .filter(Boolean)
+                    .join(' ')}
+                  onClick={() => setLogLevelFilter(option.key)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              className={styles.foldButton}
+              onClick={() => setLogsCollapsed((previous) => !previous)}
+              disabled={logs.length === 0}
+            >
+              {logsCollapsed ? <IconChevronDown size={16} /> : <IconChevronUp size={16} />}
+              <span>
+                {logsCollapsed
+                  ? t('monitoring.account_inspection_expand_logs')
+                  : t('monitoring.account_inspection_fold_logs')}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {!logsCollapsed ? (
+          <div ref={logListRef} className={styles.logList}>
+            {filteredLogs.length > 0 ? (
+              filteredLogs.map((entry) => (
+                <div key={entry.id} className={`${styles.logRow} ${levelClassMap[entry.level]}`}>
+                  <span className={styles.logTime}>{formatTimestamp(entry.timestamp, i18n.language)}</span>
+                  <span className={styles.logMessage}>{entry.message}</span>
+                </div>
+              ))
+            ) : (
+              <div className={styles.emptyBlock}>{t('monitoring.account_inspection_logs_empty')}</div>
+            )}
+          </div>
+        ) : (
+          <div className={styles.logCollapsedBar}>
+            <span>{t('monitoring.account_inspection_logs_collapsed', { count: filteredLogs.length })}</span>
+          </div>
         )}
       </Card>
 

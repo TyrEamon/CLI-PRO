@@ -55,6 +55,7 @@ export interface AccountInspectionResultItem extends AccountInspectionAccount {
   usedPercent: number | null;
   isQuota: boolean;
   error: string;
+  executed?: boolean;
 }
 
 export interface AccountInspectionSummary {
@@ -452,6 +453,7 @@ export const applyAccountInspectionExecutionResult = (
         action: 'keep',
         actionReason: '无需处理',
         error: '',
+        executed: true,
       };
     })
   );

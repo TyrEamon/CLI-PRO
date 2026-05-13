@@ -325,6 +325,9 @@ func (m *Manager) shouldRefreshForInspection(a *Auth, now time.Time) bool {
 	if a == nil {
 		return false
 	}
+	if hasUnauthorizedAuthFailure(a) {
+		return false
+	}
 	if !a.NextRefreshAfter.IsZero() && now.Before(a.NextRefreshAfter) {
 		return false
 	}
@@ -448,10 +451,18 @@ func (m *Manager) RefreshIfDueForInspection(ctx context.Context, id string) (*Au
 	}
 	now = time.Now()
 	if err != nil {
+		unauthorized := isUnauthorizedError(err)
 		m.mu.Lock()
 		if current := m.auths[id]; current != nil {
-			current.NextRefreshAfter = now.Add(refreshFailureBackoff)
-			current.LastError = &Error{Message: err.Error()}
+			current.LastError = refreshErrorFromError(err)
+			if unauthorized {
+				current.NextRefreshAfter = time.Time{}
+				current.Unavailable = true
+				current.Status = StatusError
+				current.StatusMessage = "unauthorized"
+			} else {
+				current.NextRefreshAfter = now.Add(refreshFailureBackoff)
+			}
 			m.auths[id] = current
 			if m.scheduler != nil {
 				m.scheduler.upsertAuth(current.Clone())

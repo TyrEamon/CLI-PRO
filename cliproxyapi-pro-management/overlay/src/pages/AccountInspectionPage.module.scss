@@ -245,10 +245,30 @@
   gap: 10px;
 }
 
+.summarySectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.summarySectionHeader > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
 .summarySectionHeader h2 {
   margin: 0;
   font-size: 16px;
   line-height: 1.4;
+}
+
+.summarySectionHeader p {
+  margin: 0;
+  color: var(--inspect-muted);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .summaryGrid,
@@ -549,6 +569,80 @@
   line-height: 1.6;
 }
 
+.filterTabs,
+.logLevelTabs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filterTab,
+.logLevelTab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--inspect-line);
+  border-radius: 999px;
+  background: var(--inspect-surface-muted);
+  color: var(--inspect-muted);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    color 0.18s ease;
+}
+
+.filterTab strong {
+  color: var(--inspect-ink);
+  font-size: 12px;
+}
+
+.filterTabActive,
+.logLevelTabActive {
+  border-color: color-mix(in srgb, var(--inspect-accent) 42%, var(--inspect-line));
+  background: color-mix(in srgb, var(--inspect-accent) 12%, var(--inspect-surface));
+  color: var(--inspect-accent);
+}
+
+.healthBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.healthHealthy {
+  background: color-mix(in srgb, var(--inspect-green) 12%, var(--inspect-surface));
+  color: var(--inspect-green);
+}
+
+.healthDisabled,
+.healthQuota {
+  background: color-mix(in srgb, var(--inspect-amber) 12%, var(--inspect-surface));
+  color: var(--inspect-amber);
+}
+
+.healthAuthInvalid,
+.healthError {
+  background: color-mix(in srgb, var(--inspect-red) 12%, var(--inspect-surface));
+  color: var(--inspect-red);
+}
+
+.healthRecoverable,
+.healthProcessed {
+  background: color-mix(in srgb, var(--inspect-accent) 12%, var(--inspect-surface));
+  color: var(--inspect-accent);
+}
+
 .tableWrap {
   overflow: auto;
   border: 1px solid var(--inspect-line);
@@ -564,6 +658,10 @@
 
 .accountColumn {
   width: 22%;
+}
+
+.healthColumn {
+  width: 10%;
 }
 
 .stateColumn {

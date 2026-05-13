@@ -172,7 +172,6 @@ type accountInspectionLogStreamMessage struct {
 	Schedule accountInspectionSchedule          `json:"schedule"`
 	Status   accountInspectionStatus            `json:"status"`
 	Log      *accountInspectionLogEntry         `json:"log,omitempty"`
-	Logs     []accountInspectionLogEntry        `json:"logs,omitempty"`
 }
 
 type accountInspectionScheduler struct {
@@ -408,8 +407,7 @@ func (s *accountInspectionScheduler) statusEventLocked() accountInspectionStatus
 }
 
 func (s *accountInspectionScheduler) snapshotStreamMessageLocked() accountInspectionLogStreamMessage {
-	status := s.statusSnapshotLocked()
-	return accountInspectionLogStreamMessage{Type: accountInspectionStreamSnapshot, Schedule: s.schedule, Status: status, Logs: status.Logs}
+	return accountInspectionLogStreamMessage{Type: accountInspectionStreamSnapshot, Schedule: s.schedule, Status: s.statusSnapshotLocked()}
 }
 
 func (s *accountInspectionScheduler) statusStreamMessageLocked(snapshot bool) accountInspectionLogStreamMessage {
@@ -1043,15 +1041,19 @@ func (account accountInspectionAccount) baseResult() accountInspectionResult {
 	}
 }
 
-func (account accountInspectionAccount) identity() string {
-	label := firstNonEmptyStringValue(account.Email, account.Name, account.DisplayName)
+func formatAccountInspectionIdentity(fileName string, email string, name string, displayName string) string {
+	label := firstNonEmptyStringValue(email, name, displayName)
 	if label != "" && label != "-" {
-		if account.FileName != "" {
-			return fmt.Sprintf("%s[%s]", label, account.FileName)
+		if fileName != "" {
+			return fmt.Sprintf("%s[%s]", label, fileName)
 		}
 		return label
 	}
-	return account.FileName
+	return fileName
+}
+
+func (account accountInspectionAccount) identity() string {
+	return formatAccountInspectionIdentity(account.FileName, account.Email, account.Name, account.DisplayName)
 }
 
 func (s *accountInspectionScheduler) apiCall(ctx context.Context, auth *coreauth.Auth, method string, url string, headers map[string]string, data string, timeoutMS int) (accountInspectionHTTPResult, error) {
@@ -1603,14 +1605,7 @@ func limitAccountInspectionResults(results []accountInspectionResult, limit int)
 }
 
 func resultIdentity(result accountInspectionResult) string {
-	label := firstNonEmptyStringValue(result.Email, result.Name, result.DisplayName)
-	if label != "" && label != "-" {
-		if result.FileName != "" {
-			return fmt.Sprintf("%s[%s]", label, result.FileName)
-		}
-		return label
-	}
-	return result.FileName
+	return formatAccountInspectionIdentity(result.FileName, result.Email, result.Name, result.DisplayName)
 }
 
 func quotaSuccessState(values map[string]any) map[string]any {
