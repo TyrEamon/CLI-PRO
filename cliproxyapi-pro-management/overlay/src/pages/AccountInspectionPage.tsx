@@ -360,12 +360,17 @@ const resolveResultHealthStatus = (item: AccountInspectionResultItem): ResultHea
   return 'healthy';
 };
 
-const HEALTHY_AUTH_FILE_STATUS_MESSAGES = new Set(['ok', 'healthy', 'ready', 'success', 'available']);
-
 const readAuthFileStatusMessage = (file: AuthFileItem) => {
   const raw = file['status_message'] ?? file.statusMessage;
   if (raw === undefined || raw === null) return '';
   return String(raw).trim();
+};
+
+const hasAuthFileLastError = (file: AuthFileItem) => {
+  const raw = file['last_error'] ?? file.lastError;
+  if (!raw) return false;
+  if (typeof raw === 'string') return raw.trim().length > 0;
+  return true;
 };
 
 const readBooleanValue = (value: unknown) => {
@@ -381,10 +386,10 @@ const readBooleanValue = (value: unknown) => {
 
 const isAuthFileAbnormal = (file: AuthFileItem) => {
   if (readBooleanValue(file.unavailable ?? file['unavailable'])) return true;
+  if (hasAuthFileLastError(file)) return true;
   const status = String(file.status ?? file.state ?? '').trim().toLowerCase();
-  if (['error', 'failed', 'invalid', 'unavailable', 'unauthorized', 'auth_invalid'].includes(status)) return true;
-  const message = readAuthFileStatusMessage(file);
-  return Boolean(message) && !HEALTHY_AUTH_FILE_STATUS_MESSAGES.has(message.toLowerCase());
+  if (status && !['active', 'disabled', 'pending', 'refreshing'].includes(status)) return true;
+  return readAuthFileStatusMessage(file).length > 0;
 };
 
 const isRecordValue = (value: unknown): value is Record<string, unknown> =>
@@ -510,11 +515,6 @@ const buildManualActionItem = (
   action,
   actionReason: item.actionReason || action,
 });
-
-const formatResultAccountSecondary = (item: AccountInspectionResultItem) => {
-  const identity = formatAccountInspectionIdentity(item);
-  return identity === item.fileName ? '' : identity;
-};
 
 const getManualActions = (item: AccountInspectionResultItem): ManualAccountInspectionAction[] => {
   const healthStatus = resolveResultHealthStatus(item);
@@ -1751,13 +1751,11 @@ export function AccountInspectionPage() {
                     filteredResults.map((item) => {
                       const healthStatus = resolveResultHealthStatus(item);
                       const manualActions = getManualActions(item);
-                      const accountSecondary = formatResultAccountSecondary(item);
                       return (
                         <tr key={item.key}>
                           <td>
                             <div className={styles.primaryCell}>
                               <span>{item.fileName}</span>
-                              {accountSecondary ? <small>{accountSecondary}</small> : null}
                               <small>{item.provider}</small>
                             </div>
                           </td>

@@ -796,11 +796,14 @@
 
 .operationActions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: 6px;
+  white-space: nowrap;
 }
 
 .operationActions :global(.btn) {
+  flex: 0 0 auto;
   padding: 6px 10px;
 }
 
