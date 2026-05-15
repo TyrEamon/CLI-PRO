@@ -429,9 +429,19 @@
 }
 
 .pricingPanel,
-.accountPanel,
-.realtimePanel {
+.accountPanel {
   background: var(--monitor-surface);
+}
+
+.realtimePanel {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--monitor-line);
+  border-radius: 12px;
+  background: var(--monitor-surface);
+  box-shadow: var(--shadow);
 }
 
 .accountPanelActions {
@@ -457,6 +467,23 @@
   align-items: end;
 }
 
+.realtimeFilterToolbar {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.realtimeSearchGroup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.realtimeSearchGroup :global(.form-group) {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+}
 
 .inlineMetrics,
 .savedPricesActions {
@@ -1664,6 +1691,84 @@
   overflow: visible;
 }
 
+.accountStatsToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.accountStatsFilters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.accountStatsFilters :global(.form-group) {
+  margin: 0;
+}
+
+.accountStatsSearchInput {
+  width: 180px;
+  min-width: 0;
+  height: 34px;
+  min-height: 34px;
+  padding-block: 0;
+  padding-right: 30px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.accountStatsSelect {
+  height: 34px;
+  min-height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--monitor-line);
+  border-radius: 8px;
+  background: var(--monitor-surface);
+  color: var(--monitor-ink);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  appearance: auto;
+}
+
+.accountStatsSelect:hover {
+  border-color: color-mix(in srgb, var(--monitor-accent) 35%, var(--monitor-line-strong));
+}
+
+.accountStatsClearButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--monitor-line);
+  border-radius: 8px;
+  background: var(--monitor-surface);
+  color: var(--monitor-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    color 0.18s ease;
+}
+
+.accountStatsClearButton:hover {
+  border-color: color-mix(in srgb, var(--monitor-accent) 35%, var(--monitor-line-strong));
+  background: var(--monitor-surface-hover);
+  color: var(--monitor-ink);
+}
+
 .accountOverviewCardGrid {
   --account-card-min-width: 330px;
 
@@ -2199,11 +2304,13 @@
 }
 
 .accountOverviewMetricValue {
+  min-width: 0;
   font-size: 16px;
   font-weight: 750;
   line-height: 1.35;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .accountOverviewCardBody {
@@ -2834,43 +2941,48 @@
 
 .realtimeTable th:nth-child(1),
 .realtimeTable td:nth-child(1) {
-  width: 15%;
+  width: 11%;
 }
 
 .realtimeTable th:nth-child(2),
 .realtimeTable td:nth-child(2) {
-  width: 17%;
+  width: 15%;
 }
 
 .realtimeTable th:nth-child(3),
 .realtimeTable td:nth-child(3) {
-  width: 6%;
+  width: 12%;
 }
 
 .realtimeTable th:nth-child(4),
 .realtimeTable td:nth-child(4) {
-  width: 7%;
+  width: 6%;
 }
 
 .realtimeTable th:nth-child(5),
-.realtimeTable td:nth-child(5),
+.realtimeTable td:nth-child(5) {
+  width: 7%;
+}
+
 .realtimeTable th:nth-child(6),
 .realtimeTable td:nth-child(6),
 .realtimeTable th:nth-child(7),
 .realtimeTable td:nth-child(7),
-.realtimeTable th:nth-child(10),
-.realtimeTable td:nth-child(10) {
-  width: 6%;
-}
-
 .realtimeTable th:nth-child(8),
-.realtimeTable td:nth-child(8) {
-  width: 14%;
+.realtimeTable td:nth-child(8),
+.realtimeTable th:nth-child(11),
+.realtimeTable td:nth-child(11) {
+  width: 6%;
 }
 
 .realtimeTable th:nth-child(9),
 .realtimeTable td:nth-child(9) {
-  width: 14%;
+  width: 13%;
+}
+
+.realtimeTable th:nth-child(10),
+.realtimeTable td:nth-child(10) {
+  width: 12%;
 }
 
 .table thead th {

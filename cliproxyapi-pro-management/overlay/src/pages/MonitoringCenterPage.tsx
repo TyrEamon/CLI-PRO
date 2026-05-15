@@ -13,7 +13,6 @@ import {
   IconRefreshCw,
   IconSearch,
   IconSlidersHorizontal,
-  IconTimer,
 } from '@/components/ui/icons';
 import {
   buildAccountRows,
@@ -54,24 +53,7 @@ const TIME_RANGE_OPTIONS: Array<{ value: MonitoringTimeRange; labelKey: string }
   { value: 'all', labelKey: 'monitoring.range_all' },
 ];
 
-const AUTO_REFRESH_OPTIONS = [
-  { value: '0', labelKey: 'monitoring.auto_refresh_off' },
-  { value: '5000', labelKey: 'monitoring.auto_refresh_5s' },
-  { value: '10000', labelKey: 'monitoring.auto_refresh_10s' },
-  { value: '30000', labelKey: 'monitoring.auto_refresh_30s' },
-  { value: '60000', labelKey: 'monitoring.auto_refresh_60s' },
-  { value: '300000', labelKey: 'monitoring.auto_refresh_5m' },
-];
-
 type StatusFilter = 'all' | 'success' | 'failed';
-
-type PanelProps = {
-  title: string;
-  subtitle?: string;
-  extra?: ReactNode;
-  children: ReactNode;
-  className?: string;
-};
 
 type UsageMetricCard = {
   key: string;
@@ -83,8 +65,16 @@ type UsageMetricCard = {
 };
 
 type RankingMetric = 'requests' | 'tokens' | 'cost';
+type AccountSortMetric = 'recent' | RankingMetric;
 
 const RANKING_METRIC_OPTIONS: Array<{ value: RankingMetric; label: string }> = [
+  { value: 'requests', label: '请求' },
+  { value: 'tokens', label: 'TOKEN' },
+  { value: 'cost', label: '金额' },
+];
+
+const ACCOUNT_SORT_OPTIONS: Array<{ value: AccountSortMetric; label: string }> = [
+  { value: 'recent', label: '最近' },
   { value: 'requests', label: '请求' },
   { value: 'tokens', label: 'TOKEN' },
   { value: 'cost', label: '金额' },
@@ -275,6 +265,11 @@ const getRankingMetricValue = (row: MonitoringAccountRow, metric: RankingMetric)
   if (metric === 'cost') return row.totalCost;
   if (metric === 'tokens') return row.totalTokens;
   return row.totalCalls;
+};
+
+const getAccountSortValue = (row: MonitoringAccountRow, metric: AccountSortMetric) => {
+  if (metric === 'recent') return row.lastSeenAt;
+  return getRankingMetricValue(row, metric);
 };
 
 const getRankingMetricLabel = (metric: RankingMetric) => {
@@ -1916,6 +1911,9 @@ function AccountStatsPanel({
   locale,
   t,
   rangeLabel,
+  range,
+  onRangeChange,
+  onHide,
   expandedAccounts,
   accountQuotaStates,
   accountQuotaEntriesByAccount,
@@ -1924,16 +1922,19 @@ function AccountStatsPanel({
   onRefreshQuota,
 }: {
   rows: MonitoringAccountRow[];
-  metric: RankingMetric;
+  metric: AccountSortMetric;
   emptyText: string;
   hasPrices: boolean;
   locale: string;
   t: TFunction;
   rangeLabel: string;
+  range: MonitoringTimeRange;
+  onRangeChange: (range: MonitoringTimeRange) => void;
+  onHide: () => void;
   expandedAccounts: Record<string, boolean>;
   accountQuotaStates: Record<string, AccountQuotaState>;
   accountQuotaEntriesByAccount: Map<string, AccountQuotaEntry[]>;
-  onMetricChange: (metric: RankingMetric) => void;
+  onMetricChange: (metric: AccountSortMetric) => void;
   onToggleAccount: (accountId: string, account: string) => void;
   onRefreshQuota: (account: string) => void;
 }) {
@@ -1942,109 +1943,199 @@ function AccountStatsPanel({
   const ROWS_PER_PAGE = 2;
 
   const [cardPage, setCardPage] = useState(0);
-  const gridRef = useRef<HTMLDivElement>(null);
+  const [gridEl, setGridEl] = useState<HTMLDivElement | null>(null);
+  const gridRef = useCallback((el: HTMLDivElement | null) => setGridEl(el), []);
   const [gridCols, setGridCols] = useState(3);
+  const [accountSearch, setAccountSearch] = useState('');
+  const [accountProviderFilter, setAccountProviderFilter] = useState('all');
+  const [accountHealthFilter, setAccountHealthFilter] = useState<'all' | AccountHealthTone>('all');
 
   useEffect(() => {
-    const el = gridRef.current;
-    if (!el) return;
+    if (!gridEl) return;
     const update = () => {
-      const cols = Math.max(1, Math.floor((el.clientWidth + ACCOUNT_CARD_GAP) / (ACCOUNT_CARD_MIN_WIDTH + ACCOUNT_CARD_GAP)));
-      setGridCols(cols);
+      const cols = Math.max(1, Math.floor((gridEl.clientWidth + ACCOUNT_CARD_GAP) / (ACCOUNT_CARD_MIN_WIDTH + ACCOUNT_CARD_GAP)));
+      setGridCols((current) => (current === cols ? current : cols));
     };
     update();
     const observer = new ResizeObserver(update);
-    observer.observe(el);
+    observer.observe(gridEl);
     return () => observer.disconnect();
-  }, []);
+  }, [gridEl]);
+
+  const providerOptions = useMemo(() => {
+    const set = new Set<string>();
+    rows.forEach((row) => row.providers.forEach((p) => { if (p && p !== '-') set.add(p); }));
+    return Array.from(set).sort();
+  }, [rows]);
+
+  const filteredRows = useMemo(() => {
+    const query = accountSearch.trim().toLowerCase();
+    return rows.filter((row) => {
+      if (query) {
+        const haystack = [row.accountMasked, row.account, ...row.authLabels, ...row.providers].join(' ').toLowerCase();
+        if (!haystack.includes(query)) return false;
+      }
+      if (accountProviderFilter !== 'all') {
+        if (!row.providers.includes(accountProviderFilter)) return false;
+      }
+      if (accountHealthFilter !== 'all') {
+        if (getAccountHealthTone(row) !== accountHealthFilter) return false;
+      }
+      return true;
+    });
+  }, [rows, accountSearch, accountProviderFilter, accountHealthFilter]);
+
+  const hasActiveFilters = accountSearch.trim() !== '' || accountProviderFilter !== 'all' || accountHealthFilter !== 'all';
 
   const itemsPerPage = gridCols * ROWS_PER_PAGE;
-  const totalPages = Math.max(1, Math.ceil(rows.length / itemsPerPage));
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / itemsPerPage));
   const safePageIndex = Math.min(cardPage, totalPages - 1);
-  const visibleRows = rows.slice(safePageIndex * itemsPerPage, (safePageIndex + 1) * itemsPerPage);
+  const visibleRows = filteredRows.slice(safePageIndex * itemsPerPage, (safePageIndex + 1) * itemsPerPage);
 
   useEffect(() => {
     setCardPage(0);
-  }, [rows.length]);
+  }, [accountSearch, accountProviderFilter, accountHealthFilter, metric, range, itemsPerPage]);
 
   return (
-    <Card className={styles.accountStatsCard}>
-      <div className={styles.rankingHeader}>
-        <div>
-          <h3>账号统计</h3>
+    <>
+      <div className={styles.usageTrendHeader}>
+        <div className={styles.usageTrendCopy}>
+          <h2>账号统计</h2>
           <p>按账号查看健康状态、Token 使用与近期请求活跃度。</p>
         </div>
-        <RankingMetricSwitch value={metric} onChange={onMetricChange} disabledCost={!hasPrices} />
-      </div>
-
-      {rows.length > 0 ? (
-        <>
-          <div ref={gridRef} className={styles.accountOverviewCardGrid}>
-            {visibleRows.map((row) => {
-              const statusData = buildAccountStatusData(row.recentPattern, row.lastSeenAt);
-              return (
-                <AccountOverviewCard
-                  key={row.id}
-                  row={row}
-                  hasPrices={hasPrices}
-                  locale={locale}
-                  t={t}
-                  isExpanded={Boolean(expandedAccounts[row.id])}
-                  statusData={statusData}
-                  scopeText={formatAccountOverviewScopeText(rangeLabel)}
-                  quotaState={accountQuotaStates[row.account]}
-                  quotaEntries={accountQuotaEntriesByAccount.get(row.account) ?? []}
-                  onToggle={() => onToggleAccount(row.id, row.account)}
-                  onRefreshQuota={() => onRefreshQuota(row.account)}
-                />
-              );
-            })}
+        <div className={styles.usageTrendActions}>
+          <div className={`${styles.rankingMetricSwitch} ${styles.usageTrendRangeControl}`}>
+            {TIME_RANGE_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={`${styles.rankingMetricButton} ${styles.usageTrendRangeButton} ${range === option.value ? styles.rankingMetricButtonActive : ''}`}
+                onClick={() => onRangeChange(option.value)}
+              >
+                {t(option.labelKey)}
+              </button>
+            ))}
           </div>
-          {totalPages > 1 && (
-            <div className={styles.accountCardPagination}>
-              <button
-                type="button"
-                className={styles.accountCardPageButton}
-                disabled={safePageIndex === 0}
-                onClick={() => setCardPage((p) => Math.max(0, p - 1))}
-                aria-label="上一页"
-              >
-                ‹
-              </button>
-              <span className={styles.accountCardPageInfo}>
-                {safePageIndex + 1} / {totalPages}
-              </span>
-              <button
-                type="button"
-                className={styles.accountCardPageButton}
-                disabled={safePageIndex >= totalPages - 1}
-                onClick={() => setCardPage((p) => Math.min(totalPages - 1, p + 1))}
-                aria-label="下一页"
-              >
-                ›
-              </button>
-            </div>
-          )}
-        </>
-      ) : (
-        <div className={styles.emptyBlockSmall}>{emptyText}</div>
-      )}
-    </Card>
-  );
-}
-
-function Panel({ title, subtitle, extra, children, className }: PanelProps) {
-  return (
-    <Card className={[styles.panel, className].filter(Boolean).join(' ')}>
-      <div className={styles.panelHeader}>
-        <div>
-          <h2 className={styles.panelTitle}>{title}</h2>
-          {subtitle ? <p className={styles.panelSubtitle}>{subtitle}</p> : null}
+          <button type="button" className={`${styles.rankingMetricButton} ${styles.usageTrendHideButton}`} onClick={onHide}>
+            隐藏分析
+          </button>
         </div>
-        {extra ? <div className={styles.panelExtra}>{extra}</div> : null}
       </div>
-      {children}
-    </Card>
+
+      <Card className={styles.accountStatsCard}>
+        <div className={styles.accountStatsToolbar}>
+          <div className={styles.accountStatsFilters}>
+            <Input
+              value={accountSearch}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setAccountSearch(event.target.value)}
+              placeholder="搜索账号"
+              className={styles.accountStatsSearchInput}
+              rightElement={<IconSearch size={14} />}
+              aria-label="搜索账号"
+            />
+            {providerOptions.length > 0 && (
+              <select
+                value={accountProviderFilter}
+                onChange={(event) => setAccountProviderFilter(event.target.value)}
+                className={styles.accountStatsSelect}
+                aria-label="按提供商筛选"
+              >
+                <option value="all">全部提供商</option>
+                {providerOptions.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+            )}
+            <select
+              value={accountHealthFilter}
+              onChange={(event) => setAccountHealthFilter(event.target.value as 'all' | AccountHealthTone)}
+              className={styles.accountStatsSelect}
+              aria-label="按健康状态筛选"
+            >
+              <option value="all">全部状态</option>
+              <option value="good">健康</option>
+              <option value="warn">警告</option>
+              <option value="bad">异常</option>
+            </select>
+            {hasActiveFilters && (
+              <button
+                type="button"
+                className={styles.accountStatsClearButton}
+                onClick={() => { setAccountSearch(''); setAccountProviderFilter('all'); setAccountHealthFilter('all'); }}
+              >
+                清除
+              </button>
+            )}
+          </div>
+          <div className={styles.rankingMetricSwitch} role="group" aria-label="账号排序方式">
+            {ACCOUNT_SORT_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={`${styles.rankingMetricButton} ${metric === option.value ? styles.rankingMetricButtonActive : ''}`}
+                onClick={() => onMetricChange(option.value)}
+                disabled={option.value === 'cost' && !hasPrices}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {filteredRows.length > 0 ? (
+          <>
+            <div ref={gridRef} className={styles.accountOverviewCardGrid}>
+              {visibleRows.map((row) => {
+                const statusData = buildAccountStatusData(row.recentPattern, row.lastSeenAt);
+                return (
+                  <AccountOverviewCard
+                    key={row.id}
+                    row={row}
+                    hasPrices={hasPrices}
+                    locale={locale}
+                    t={t}
+                    isExpanded={Boolean(expandedAccounts[row.id])}
+                    statusData={statusData}
+                    scopeText={formatAccountOverviewScopeText(rangeLabel)}
+                    quotaState={accountQuotaStates[row.account]}
+                    quotaEntries={accountQuotaEntriesByAccount.get(row.account) ?? []}
+                    onToggle={() => onToggleAccount(row.id, row.account)}
+                    onRefreshQuota={() => onRefreshQuota(row.account)}
+                  />
+                );
+              })}
+            </div>
+            {totalPages > 1 && (
+              <div className={styles.accountCardPagination}>
+                <button
+                  type="button"
+                  className={styles.accountCardPageButton}
+                  disabled={safePageIndex === 0}
+                  onClick={() => setCardPage((p) => Math.max(0, p - 1))}
+                  aria-label="上一页"
+                >
+                  ‹
+                </button>
+                <span className={styles.accountCardPageInfo}>
+                  {safePageIndex + 1} / {totalPages}
+                </span>
+                <button
+                  type="button"
+                  className={styles.accountCardPageButton}
+                  disabled={safePageIndex >= totalPages - 1}
+                  onClick={() => setCardPage((p) => Math.min(totalPages - 1, p + 1))}
+                  aria-label="下一页"
+                >
+                  ›
+                </button>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className={styles.emptyBlockSmall}>{hasActiveFilters ? '没有匹配筛选条件的账号' : emptyText}</div>
+        )}
+      </Card>
+    </>
   );
 }
 
@@ -2096,11 +2187,10 @@ export function MonitoringCenterPage() {
   const quotaStore = useQuotaStore((state) => state);
   const [timeRange, setTimeRange] = useState<MonitoringTimeRange>('today');
   const [searchInput, setSearchInput] = useState('');
-  const [autoRefreshMs, setAutoRefreshMs] = useState('5000');
   const [selectedAccount, setSelectedAccount] = useState('all');
   const [selectedProvider, setSelectedProvider] = useState('all');
   const [selectedModel, setSelectedModel] = useState('all');
-  const [selectedChannel, setSelectedChannel] = useState('all');
+  const [selectedApiKey, setSelectedApiKey] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState<StatusFilter>('all');
   const [expandedAccounts, setExpandedAccounts] = useState<Record<string, boolean>>({});
   const [isPriceModalOpen, setIsPriceModalOpen] = useState(false);
@@ -2113,7 +2203,9 @@ export function MonitoringCenterPage() {
   const [isUsageTrendHidden, setIsUsageTrendHidden] = useState(false);
   const [modelRankingMetric, setModelRankingMetric] = useState<RankingMetric>('requests');
   const [apiKeyRankingMetric, setApiKeyRankingMetric] = useState<RankingMetric>('requests');
-  const [accountStatsMetric, setAccountStatsMetric] = useState<RankingMetric>('requests');
+  const [accountStatsMetric, setAccountStatsMetric] = useState<AccountSortMetric>('recent');
+  const [accountStatsRange, setAccountStatsRange] = useState<MonitoringTimeRange>('today');
+  const [isAccountStatsHidden, setIsAccountStatsHidden] = useState(false);
   const accountQuotaStatesRef = useRef<Record<string, AccountQuotaState>>({});
   const accountQuotaRequestIdsRef = useRef<Record<string, number>>({});
   const deferredSearch = useDeferredValue(searchInput);
@@ -2122,7 +2214,6 @@ export function MonitoringCenterPage() {
     usage,
     loading: usageLoading,
     error: usageError,
-    lastRefreshedAt,
     modelPrices,
     setModelPrices,
     loadUsage,
@@ -2224,7 +2315,7 @@ export function MonitoringCenterPage() {
     () => {
       void refreshUsageOnly().catch(() => {});
     },
-    connectionStatus === 'connected' && Number(autoRefreshMs) > 0 ? Number(autoRefreshMs) : null
+    connectionStatus === 'connected' ? 5000 : null
   );
 
   const overallLoading = usageLoading || monitoringLoading;
@@ -2275,15 +2366,20 @@ export function MonitoringCenterPage() {
     [filteredRows, t]
   );
 
-  const channelOptions = useMemo(
+  const apiKeyOptions = useMemo(
     () => [
-      { value: 'all', label: t('monitoring.filter_all_channels') },
-      ...Array.from(new Set(filteredRows.map((row) => row.channel)))
-        .filter(Boolean)
-        .sort((left, right) => left.localeCompare(right))
-        .map((value) => ({ value, label: value })),
+      { value: 'all', label: '全部密钥' },
+      ...Array.from(
+        new Map(
+          filteredRows
+            .filter((row) => row.apiKeyHash && row.apiKeyHash !== '-')
+            .map((row) => [row.apiKeyHash, row.apiKeyMasked || row.apiKeyHash])
+        ).entries()
+      )
+        .sort((left, right) => left[1].localeCompare(right[1]))
+        .map(([value, label]) => ({ value, label })),
     ],
-    [filteredRows, t]
+    [filteredRows]
   );
 
   const statusOptions = useMemo(
@@ -2328,7 +2424,7 @@ export function MonitoringCenterPage() {
         if (selectedModel !== 'all' && row.model !== selectedModel) {
           return false;
         }
-        if (selectedChannel !== 'all' && row.channel !== selectedChannel) {
+        if (selectedApiKey !== 'all' && row.apiKeyHash !== selectedApiKey) {
           return false;
         }
         if (selectedStatus === 'success' && row.failed) {
@@ -2339,7 +2435,7 @@ export function MonitoringCenterPage() {
         }
         return true;
       }),
-    [filteredRows, selectedAccount, selectedChannel, selectedModel, selectedProvider, selectedStatus]
+    [filteredRows, selectedAccount, selectedApiKey, selectedModel, selectedProvider, selectedStatus]
   );
 
   const topStatsRows = useMemo(() => allRows.filter((row) => row.statsIncluded), [allRows]);
@@ -2403,30 +2499,31 @@ export function MonitoringCenterPage() {
     () => getRankingMetricTotalFromRows(trendStatsRows, apiKeyRankingMetric),
     [apiKeyRankingMetric, trendStatsRows]
   );
-  const accountStatsRows = useMemo(
-    () => [...buildAccountRows(trendStatsRows, 'account')]
-      .sort((left, right) => (
-        getRankingMetricValue(right, accountStatsMetric) - getRankingMetricValue(left, accountStatsMetric)
-        || right.totalCalls - left.totalCalls
-        || right.totalTokens - left.totalTokens
-        || right.totalCost - left.totalCost
-        || right.lastSeenAt - left.lastSeenAt
-      ))
-      .slice(0, 6),
-    [accountStatsMetric, trendStatsRows]
+  const accountStatsFilteredRows = useMemo(
+    () => filterRowsByRange(topStatsRows, accountStatsRange),
+    [topStatsRows, accountStatsRange]
   );
-  const accountStatsRangeLabel = useMemo(() => buildUsageTrendRangeLabel(usageTrendRange), [usageTrendRange]);
+  const accountStatsRows = useMemo(
+    () => [...buildAccountRows(accountStatsFilteredRows, 'account')]
+      .sort((left, right) => (
+        getAccountSortValue(right, accountStatsMetric) - getAccountSortValue(left, accountStatsMetric)
+        || right.lastSeenAt - left.lastSeenAt
+        || right.totalCalls - left.totalCalls
+      )),
+    [accountStatsMetric, accountStatsFilteredRows]
+  );
+  const accountStatsRangeLabel = useMemo(() => buildUsageTrendRangeLabel(accountStatsRange), [accountStatsRange]);
   const realtimeLogRows = useMemo(() => buildRealtimeLogRows(scopedRows), [scopedRows]);
 
-  const trendAccountQuotaTargetsByAccount = useMemo(
-    () => buildAccountQuotaTargetsByAccount(trendStatsRows, authFilesByAuthIndex),
-    [authFilesByAuthIndex, trendStatsRows]
+  const accountQuotaTargetsByAccount = useMemo(
+    () => buildAccountQuotaTargetsByAccount(accountStatsFilteredRows, authFilesByAuthIndex),
+    [authFilesByAuthIndex, accountStatsFilteredRows]
   );
-  const trendAccountQuotaEntriesByAccount = useMemo(
-    () => buildAccountQuotaEntriesByAccount(trendAccountQuotaTargetsByAccount, quotaStore, t),
-    [trendAccountQuotaTargetsByAccount, quotaStore, t]
+  const accountQuotaEntriesByAccount = useMemo(
+    () => buildAccountQuotaEntriesByAccount(accountQuotaTargetsByAccount, quotaStore, t),
+    [accountQuotaTargetsByAccount, quotaStore, t]
   );
-  const quotaTargetsByAccountForLoading = trendAccountQuotaTargetsByAccount;
+  const quotaTargetsByAccountForLoading = accountQuotaTargetsByAccount;
 
   const activeScopeRows = scopedRows;
   const scopedFailureCount = activeScopeRows.filter((row) => row.failed).length;
@@ -2436,7 +2533,7 @@ export function MonitoringCenterPage() {
   );
 
   const selectedFiltersCount =
-    [selectedAccount, selectedProvider, selectedModel, selectedChannel, selectedStatus].filter(
+    [selectedAccount, selectedProvider, selectedModel, selectedApiKey, selectedStatus].filter(
       (value) => value !== 'all'
     ).length + (deferredSearch.trim() ? 1 : 0);
 
@@ -2492,7 +2589,7 @@ export function MonitoringCenterPage() {
     setSelectedAccount('all');
     setSelectedProvider('all');
     setSelectedModel('all');
-    setSelectedChannel('all');
+    setSelectedApiKey('all');
     setSelectedStatus('all');
   }, []);
 
@@ -2734,21 +2831,6 @@ export function MonitoringCenterPage() {
               emptyText={t('monitoring.no_data')}
             />
           </div>
-          <AccountStatsPanel
-            rows={accountStatsRows}
-            metric={accountStatsMetric}
-            emptyText={t('monitoring.no_data')}
-            hasPrices={hasPrices}
-            locale={i18n.language}
-            t={t}
-            rangeLabel={accountStatsRangeLabel}
-            expandedAccounts={expandedAccounts}
-            accountQuotaStates={accountQuotaStates}
-            accountQuotaEntriesByAccount={trendAccountQuotaEntriesByAccount}
-            onMetricChange={setAccountStatsMetric}
-            onToggleAccount={toggleAccountExpanded}
-            onRefreshQuota={(account) => void loadAccountQuota(account, true)}
-          />
         </section>
       ) : (
         <section className={styles.usageTrendCollapsed}>
@@ -2762,16 +2844,68 @@ export function MonitoringCenterPage() {
         </section>
       )}
 
-      <Panel
-        title={t('monitoring.analysis_tab_logs')}
-        subtitle={
-          selectedFiltersCount > 0
-            ? t('monitoring.active_filters_hint', { count: selectedFiltersCount, rows: activeScopeRows.length })
-            : t('monitoring.realtime_table_desc')
-        }
-        className={styles.realtimePanel}
-        extra={
-          <div className={styles.toolbarHeaderActions}>
+      {!isAccountStatsHidden ? (
+        <section className={styles.usageTrendSection}>
+          <AccountStatsPanel
+            rows={accountStatsRows}
+            metric={accountStatsMetric}
+            emptyText={t('monitoring.no_data')}
+            hasPrices={hasPrices}
+            locale={i18n.language}
+            t={t}
+            rangeLabel={accountStatsRangeLabel}
+            range={accountStatsRange}
+            onRangeChange={setAccountStatsRange}
+            onHide={() => setIsAccountStatsHidden(true)}
+            expandedAccounts={expandedAccounts}
+            accountQuotaStates={accountQuotaStates}
+            accountQuotaEntriesByAccount={accountQuotaEntriesByAccount}
+            onMetricChange={setAccountStatsMetric}
+            onToggleAccount={toggleAccountExpanded}
+            onRefreshQuota={(account) => void loadAccountQuota(account, true)}
+          />
+        </section>
+      ) : (
+        <section className={styles.usageTrendCollapsed}>
+          <div>
+            <h2>账号统计</h2>
+            <p>账号统计已隐藏，可随时重新显示。</p>
+          </div>
+          <button type="button" className={styles.usageTrendHideButton} onClick={() => setIsAccountStatsHidden(false)}>
+            显示账号统计
+          </button>
+        </section>
+      )}
+
+      <section className={styles.usageTrendSection}>
+        <div className={styles.usageTrendHeader}>
+          <div className={styles.usageTrendCopy}>
+            <h2>{t('monitoring.analysis_tab_logs')}</h2>
+            <p>
+              {selectedFiltersCount > 0
+                ? t('monitoring.active_filters_hint', { count: selectedFiltersCount, rows: activeScopeRows.length })
+                : t('monitoring.realtime_table_desc')}
+            </p>
+          </div>
+          <div className={styles.usageTrendActions}>
+            <div className={`${styles.rankingMetricSwitch} ${styles.usageTrendRangeControl}`}>
+              {TIME_RANGE_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`${styles.rankingMetricButton} ${styles.usageTrendRangeButton} ${timeRange === option.value ? styles.rankingMetricButtonActive : ''}`}
+                  onClick={() => setTimeRange(option.value)}
+                >
+                  {t(option.labelKey)}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <Card className={styles.realtimePanel}>
+        <div className={styles.realtimeFilterToolbar}>
+          <div className={styles.realtimeSearchGroup}>
             <Input
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
@@ -2785,59 +2919,6 @@ export function MonitoringCenterPage() {
               <span>{t('monitoring.clear_filters')}</span>
             </button>
           </div>
-        }
-      >
-        <div className={styles.toolbarControlRow}>
-          <div className={styles.segmentedControl}>
-            {TIME_RANGE_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className={`${styles.segmentButton} ${timeRange === option.value ? styles.segmentButtonActive : ''}`}
-                onClick={() => setTimeRange(option.value)}
-              >
-                {t(option.labelKey)}
-              </button>
-            ))}
-          </div>
-
-          <div className={styles.refreshCluster}>
-            <span className={styles.syncPill}>
-              {t('monitoring.last_sync')}: {lastRefreshedAt ? lastRefreshedAt.toLocaleTimeString(i18n.language) : '--'}
-            </span>
-
-            <div className={styles.refreshControls}>
-              <div className={styles.autoRefreshField}>
-                <span className={styles.autoRefreshLabel}>
-                  <IconTimer size={16} />
-                  {t('monitoring.auto_refresh')}
-                </span>
-                <Select
-                  className={styles.autoRefreshSelect}
-                  triggerClassName={styles.autoRefreshSelectTrigger}
-                  value={autoRefreshMs}
-                  options={AUTO_REFRESH_OPTIONS.map((option) => ({
-                    value: option.value,
-                    label: t(option.labelKey),
-                  }))}
-                  onChange={setAutoRefreshMs}
-                  ariaLabel={t('monitoring.auto_refresh')}
-                  fullWidth={false}
-                />
-              </div>
-
-              <button
-                type="button"
-                className={styles.refreshButton}
-                onClick={() => void refreshAll()}
-                disabled={overallLoading}
-              >
-                <IconRefreshCw size={16} className={overallLoading ? styles.refreshIconSpinning : styles.refreshIcon} />
-                <span className={styles.refreshButtonLabel}>{t('usage_stats.refresh')}</span>
-              </button>
-            </div>
-          </div>
-        </div>
 
         <div className={styles.filterGrid}>
           <Select
@@ -2859,10 +2940,10 @@ export function MonitoringCenterPage() {
             ariaLabel={t('monitoring.filter_model')}
           />
           <Select
-            value={selectedChannel}
-            options={channelOptions}
-            onChange={setSelectedChannel}
-            ariaLabel={t('monitoring.filter_channel')}
+            value={selectedApiKey}
+            options={apiKeyOptions}
+            onChange={setSelectedApiKey}
+            ariaLabel="按 API 密钥筛选"
           />
           <Select
             value={selectedStatus}
@@ -2870,6 +2951,7 @@ export function MonitoringCenterPage() {
             onChange={(value) => setSelectedStatus(value as StatusFilter)}
             ariaLabel={t('monitoring.filter_status')}
           />
+        </div>
         </div>
 
         {combinedError ? <div className={styles.errorBox}>{combinedError}</div> : null}
@@ -2885,6 +2967,7 @@ export function MonitoringCenterPage() {
               <tr>
                 <th>{t('monitoring.column_type')}</th>
                 <th>{t('monitoring.column_model')}</th>
+                <th>API 密钥</th>
                 <th>{t('monitoring.recent_status')}</th>
                 <th>{t('monitoring.request_status')}</th>
                 <th>{t('monitoring.column_success_rate')}</th>
@@ -2909,6 +2992,9 @@ export function MonitoringCenterPage() {
                       <span className={styles.monoCell}>{row.model}</span>
                       <small className={styles.monoCell}>{buildRealtimeMetaText(row)}</small>
                     </div>
+                  </td>
+                  <td>
+                    <span className={styles.monoCell}>{row.apiKeyMasked}</span>
                   </td>
                   <td>
                     <div className={styles.recentStatusCell}>
@@ -2965,7 +3051,7 @@ export function MonitoringCenterPage() {
               ))}
               {realtimeLogRows.length === 0 ? (
                 <tr>
-                  <td colSpan={10}>
+                  <td colSpan={11}>
                     <div className={styles.emptyTable}>
                       {deferredSearch.trim() ? t('monitoring.no_filtered_data') : t('monitoring.no_data')}
                     </div>
@@ -2975,7 +3061,8 @@ export function MonitoringCenterPage() {
             </tbody>
           </table>
         </div>
-      </Panel>
+        </Card>
+      </section>
 
       <Modal
         open={isPriceModalOpen}
