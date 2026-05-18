@@ -108,6 +108,15 @@ type ScheduleDraft = {
   intervalMinutes: string;
 };
 
+type ProviderAccountStats = {
+  provider: string;
+  total: number;
+  enabled: number;
+  disabled: number;
+  quotaLow: number;
+  abnormal: number;
+};
+
 type AuthFileAccountStats = {
   total: number;
   providerCount: number;
@@ -115,6 +124,7 @@ type AuthFileAccountStats = {
   disabled: number;
   quotaLow: number;
   abnormal: number;
+  providers: ProviderAccountStats[];
 };
 
 type AutoExecutionCounts = {
@@ -390,11 +400,31 @@ const isAuthFileAbnormal = (file: AuthFileItem) => {
   return readAuthFileStatusMessage(file).length > 0;
 };
 
+const incrementProviderStats = (stats: ProviderAccountStats, disabled: boolean, quotaLow: boolean, abnormal: boolean) => {
+  stats.total += 1;
+  if (disabled) {
+    stats.disabled += 1;
+  } else {
+    stats.enabled += 1;
+  }
+  if (quotaLow) stats.quotaLow += 1;
+  if (abnormal) stats.abnormal += 1;
+};
+
+const emptyProviderAccountStats = (provider: string): ProviderAccountStats => ({
+  provider,
+  total: 0,
+  enabled: 0,
+  disabled: 0,
+  quotaLow: 0,
+  abnormal: 0,
+});
+
 const buildAuthFileAccountStats = (
   files: AuthFileItem[],
   quotaStore: QuotaAccountStatsState
 ): AuthFileAccountStats => {
-  const providers = new Set<string>();
+  const providerStats = new Map<string, ProviderAccountStats>();
   const stats: AuthFileAccountStats = {
     total: files.length,
     providerCount: 0,
@@ -402,34 +432,35 @@ const buildAuthFileAccountStats = (
     disabled: 0,
     quotaLow: 0,
     abnormal: 0,
+    providers: [],
   };
 
   files.forEach((file) => {
-    const provider = resolveAuthProvider(file);
-    if (provider) providers.add(provider);
-
-    if (isDisabledAuthFile(file)) {
-      stats.disabled += 1;
-    } else {
-      stats.enabled += 1;
-    }
-
-    if (isAuthFileAbnormal(file)) {
-      stats.abnormal += 1;
-    }
-
-    if (
+    const provider = resolveAuthProvider(file) || 'unknown';
+    const disabled = isDisabledAuthFile(file);
+    const abnormal = isAuthFileAbnormal(file);
+    const quotaLow =
       isQuotaLowState(quotaStore.antigravityQuota[file.name]) ||
       isQuotaLowState(quotaStore.claudeQuota[file.name]) ||
       isQuotaLowState(quotaStore.codexQuota[file.name]) ||
       isQuotaLowState(quotaStore.geminiCliQuota[file.name]) ||
-      isQuotaLowState(quotaStore.kimiQuota[file.name])
-    ) {
-      stats.quotaLow += 1;
+      isQuotaLowState(quotaStore.kimiQuota[file.name]);
+
+    if (disabled) {
+      stats.disabled += 1;
+    } else {
+      stats.enabled += 1;
     }
+    if (abnormal) stats.abnormal += 1;
+    if (quotaLow) stats.quotaLow += 1;
+
+    const providerEntry = providerStats.get(provider) ?? emptyProviderAccountStats(provider);
+    incrementProviderStats(providerEntry, disabled, quotaLow, abnormal);
+    providerStats.set(provider, providerEntry);
   });
 
-  stats.providerCount = providers.size;
+  stats.providers = [...providerStats.values()].sort((left, right) => right.total - left.total || left.provider.localeCompare(right.provider));
+  stats.providerCount = stats.providers.length;
   return stats;
 };
 
@@ -574,6 +605,72 @@ const countActions = (items: AccountInspectionResultItem[]) => {
   });
 
   return summary;
+};
+
+const buildActionRiskPreview = (items: AccountInspectionResultItem[], t: ReturnType<typeof useTranslation>['t']) =>
+  items
+    .filter((item) => item.action === 'delete' || item.action === 'disable')
+    .slice(0, 5)
+    .map((item) => ({
+      key: item.key,
+      account: item.fileName,
+      provider: item.provider,
+      action: formatActionLabel(item.action, t),
+      reason: item.actionReason || item.error || '-',
+      dangerous: item.action === 'delete',
+    }));
+
+const buildExecuteConfirmationMessage = (
+  items: AccountInspectionResultItem[],
+  t: ReturnType<typeof useTranslation>['t'],
+  hasAutoExecutePolicy: boolean
+) => {
+  const counts = countActions(items);
+  const preview = buildActionRiskPreview(items, t);
+  const hasDelete = counts.delete > 0;
+
+  return (
+    <div className={styles.confirmationBody}>
+      <p>
+        {t('monitoring.account_inspection_execute_confirm_body', {
+          total: items.length,
+          delete: counts.delete,
+          disable: counts.disable,
+          enable: counts.enable,
+        })}
+      </p>
+      <div className={styles.confirmationStats}>
+        <span className={hasDelete ? styles.confirmationDangerStat : ''}>{`${t('monitoring.account_inspection_action_delete')}: ${counts.delete}`}</span>
+        <span>{`${t('monitoring.account_inspection_action_disable')}: ${counts.disable}`}</span>
+        <span>{`${t('monitoring.account_inspection_action_enable')}: ${counts.enable}`}</span>
+      </div>
+      {preview.length > 0 ? (
+        <div className={styles.confirmationPreview}>
+          <strong>{t('monitoring.account_inspection_preview_title')}</strong>
+          {preview.map((item) => (
+            <div key={item.key} className={styles.confirmationPreviewRow}>
+              <span>{item.account}</span>
+              <small>{item.provider}</small>
+              <strong className={item.dangerous ? styles.errorText : undefined}>{item.action}</strong>
+              <em>{item.reason}</em>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {hasAutoExecutePolicy ? (
+        <p className={styles.warningText}>
+          {t('monitoring.account_inspection_settings_auto_section_desc')}
+        </p>
+      ) : null}
+      {hasDelete ? (
+        <p className={styles.dangerText}>
+          {t('monitoring.account_inspection_delete_irreversible_warning', {
+            defaultValue: 'Delete actions cannot be restored from this page. Confirm that auth files are backed up before continuing.',
+          })}
+        </p>
+      ) : null}
+    </div>
+  );
 };
 
 const withChanged = <S, K extends keyof S>(
@@ -822,6 +919,7 @@ export function AccountInspectionPage() {
   const [authFiles, setAuthFiles] = useState<AuthFileItem[]>([]);
   const [authFilesLoaded, setAuthFilesLoaded] = useState(false);
   const [executing, setExecuting] = useState(false);
+  const [recheckingKey, setRecheckingKey] = useState<string | null>(null);
   const [exportingAuthFiles, setExportingAuthFiles] = useState(false);
   const logListRef = useRef<HTMLDivElement | null>(null);
   const refreshedBackendFinishedAtRef = useRef(0);
@@ -1118,7 +1216,7 @@ export function AccountInspectionPage() {
   );
 
   const actionableResults = useMemo(
-    () => allResults.filter(isSuggestedAction),
+    () => allResults.filter((item) => isSuggestedAction(item) && !item.executed),
     [allResults]
   );
 
@@ -1127,8 +1225,10 @@ export function AccountInspectionPage() {
     [allResults]
   );
 
+  const resultFilterWithFallback = resultFilter === 'pending' && actionableResults.length === 0 && allResults.length > 0 ? 'all' : resultFilter;
+
   const filteredResults = useMemo(() => {
-    switch (resultFilter) {
+    switch (resultFilterWithFallback) {
       case 'all':
         return allResults;
       case 'authInvalid':
@@ -1145,7 +1245,7 @@ export function AccountInspectionPage() {
       default:
         return actionableResults;
     }
-  }, [actionableResults, allResults, resultFilter]);
+  }, [actionableResults, allResults, resultFilterWithFallback]);
 
   const filteredLogs = useMemo(
     () => (logLevelFilter === 'all' ? logs : logs.filter((entry) => entry.level === logLevelFilter)),
@@ -1159,18 +1259,20 @@ export function AccountInspectionPage() {
     const counts = countActions(targets);
     showConfirmation({
       title: t('monitoring.account_inspection_execute_confirm_title'),
-      message: t('monitoring.account_inspection_execute_confirm_body', {
-        total: targets.length,
-        delete: counts.delete,
-        disable: counts.disable,
-        enable: counts.enable,
+      message: buildExecuteConfirmationMessage(
+        targets,
+        t,
+        hasAccountInspectionAutoExecutePolicies(inspectionSettings)
+      ),
+      confirmText: t('monitoring.account_inspection_execute_confirm_button', {
+        defaultValue: 'Execute {{count}} Actions',
+        count: targets.length,
       }),
-      confirmText: t('monitoring.account_inspection_execute_now'),
       cancelText: t('common.cancel'),
-      variant: 'danger',
+      variant: counts.delete > 0 ? 'danger' : 'primary',
       onConfirm: () => executeItems(targets),
     });
-  }, [actionableResults, executeItems, result, showConfirmation, t]);
+  }, [actionableResults, executeItems, inspectionSettings, result, showConfirmation, t]);
 
   const handleExecuteSingle = useCallback(
     (item: AccountInspectionResultItem, manualAction?: ManualAccountInspectionAction) => {
@@ -1178,17 +1280,51 @@ export function AccountInspectionPage() {
       const actionLabel = formatActionLabel(target.action, t);
       showConfirmation({
         title: t('monitoring.account_inspection_execute_single_title'),
-        message: t('monitoring.account_inspection_execute_single_body', {
-          account: target.fileName,
-          action: actionLabel,
-        }),
+        message: buildExecuteConfirmationMessage(
+          [target],
+          t,
+          hasAccountInspectionAutoExecutePolicies(inspectionSettings)
+        ),
         confirmText: actionLabel,
         cancelText: t('common.cancel'),
         variant: target.action === 'delete' ? 'danger' : 'primary',
         onConfirm: () => executeItems([target]),
       });
     },
-    [executeItems, showConfirmation, t]
+    [executeItems, inspectionSettings, showConfirmation, t]
+  );
+
+  const handleRecheckSingle = useCallback(
+    async (item: AccountInspectionResultItem) => {
+      if (connectionStatus !== 'connected') {
+        showNotification(t('notification.connection_required'), 'warning');
+        return;
+      }
+      setRecheckingKey(item.key);
+      setLogsCollapsed(false);
+      appendLog('info', t('monitoring.account_inspection_recheck_started', {
+        defaultValue: 'Rechecking {{account}}',
+        account: item.fileName,
+      }));
+      try {
+        const response = await accountInspectionApi.inspectOne({
+          key: item.key,
+          provider: item.provider,
+          fileName: item.fileName,
+          displayName: item.displayAccount,
+          email: item.email,
+          name: item.name,
+          authIndex: item.authIndex,
+          disabled: item.disabled,
+        });
+        applyBackendResponse(response);
+      } catch (error) {
+        handleAccountInspectionControlError(error, appendLog, showNotification, t('common.unknown_error'));
+      } finally {
+        setRecheckingKey(null);
+      }
+    },
+    [appendLog, applyBackendResponse, connectionStatus, showNotification, t]
   );
 
   const quotaStore = useMemo(
@@ -1201,83 +1337,74 @@ export function AccountInspectionPage() {
     [authFiles, quotaStore]
   );
 
-  const accountSummaryCards = useMemo<SummaryCard[]>(() => {
-    if (!authFilesLoaded) {
-      return [
-        { key: 'total', label: t('monitoring.account_inspection_account_total'), value: '--' },
-        { key: 'providers', label: t('monitoring.account_inspection_provider_count'), value: '--' },
-        { key: 'enabled', label: t('monitoring.account_inspection_account_enabled'), value: '--' },
-        { key: 'disabled', label: t('monitoring.account_inspection_account_disabled'), value: '--' },
-        { key: 'quotaLow', label: t('monitoring.account_inspection_account_quota_low'), value: '--' },
-        { key: 'abnormal', label: t('monitoring.account_inspection_account_abnormal'), value: '--' },
-      ];
-    }
+  const accountAssetCards = useMemo<SummaryCard[]>(() => [
+    {
+      key: 'providers',
+      label: t('monitoring.account_inspection_provider_count'),
+      value: authFilesLoaded ? String(authFileStats.providerCount) : '--',
+    },
+    {
+      key: 'total',
+      label: t('monitoring.account_inspection_account_total'),
+      value: authFilesLoaded ? String(authFileStats.total) : '--',
+    },
+    {
+      key: 'enabled',
+      label: t('monitoring.account_inspection_account_enabled'),
+      value: authFilesLoaded ? String(authFileStats.enabled) : '--',
+      tone: authFilesLoaded && authFileStats.enabled > 0 ? 'good' : 'neutral',
+    },
+    {
+      key: 'disabled',
+      label: t('monitoring.account_inspection_account_disabled'),
+      value: authFilesLoaded ? String(authFileStats.disabled) : '--',
+      tone: authFilesLoaded && authFileStats.disabled > 0 ? 'warn' : 'neutral',
+    },
+    {
+      key: 'quotaLow',
+      label: t('monitoring.account_inspection_account_quota_low'),
+      value: authFilesLoaded ? String(authFileStats.quotaLow) : '--',
+      tone: authFilesLoaded && authFileStats.quotaLow > 0 ? 'bad' : 'neutral',
+    },
+    {
+      key: 'abnormal',
+      label: t('monitoring.account_inspection_account_abnormal'),
+      value: authFilesLoaded ? String(authFileStats.abnormal) : '--',
+      tone: authFilesLoaded && authFileStats.abnormal > 0 ? 'bad' : 'neutral',
+    },
+  ], [authFileStats, authFilesLoaded, t]);
 
-    return [
-      {
-        key: 'total',
-        label: t('monitoring.account_inspection_account_total'),
-        value: String(authFileStats.total),
-      },
-      {
-        key: 'providers',
-        label: t('monitoring.account_inspection_provider_count'),
-        value: String(authFileStats.providerCount),
-      },
-      {
-        key: 'enabled',
-        label: t('monitoring.account_inspection_account_enabled'),
-        value: String(authFileStats.enabled),
-        tone: authFileStats.enabled > 0 ? 'good' : 'neutral',
-      },
-      {
-        key: 'disabled',
-        label: t('monitoring.account_inspection_account_disabled'),
-        value: String(authFileStats.disabled),
-        tone: authFileStats.disabled > 0 ? 'warn' : 'neutral',
-      },
-      {
-        key: 'quotaLow',
-        label: t('monitoring.account_inspection_account_quota_low'),
-        value: String(authFileStats.quotaLow),
-        tone: authFileStats.quotaLow > 0 ? 'warn' : 'neutral',
-      },
-      {
-        key: 'abnormal',
-        label: t('monitoring.account_inspection_account_abnormal'),
-        value: String(authFileStats.abnormal),
-        tone: authFileStats.abnormal > 0 ? 'bad' : 'neutral',
-      },
-    ];
-  }, [authFileStats, authFilesLoaded, t]);
+  const actionStats = useMemo(() => {
+    const suggested = countActions(actionableResults);
+    const autoTotal = autoExecutionCounts.delete + autoExecutionCounts.disable + autoExecutionCounts.enable;
+    const manualTotal = suggested.delete + suggested.disable + suggested.enable;
+    return {
+      autoTotal,
+      manualTotal,
+      autoDelete: autoExecutionCounts.delete,
+      autoDisable: autoExecutionCounts.disable,
+      autoEnable: autoExecutionCounts.enable,
+      manualDelete: suggested.delete,
+      manualDisable: suggested.disable,
+      manualEnable: suggested.enable,
+      keep: result?.summary.keepCount ?? 0,
+      error: result?.summary.errorCount ?? 0,
+    };
+  }, [actionableResults, autoExecutionCounts, result]);
 
   const inspectionSummaryCards = useMemo<SummaryCard[]>(() => {
     const summarySource =
       result?.summary ?? (runStatus === 'running' || runStatus === 'paused' ? progress.summary : null);
-    const hasAutoExecutePolicy = hasAccountInspectionAutoExecutePolicies(inspectionSettings);
-    const deleteLabel = hasAutoExecutePolicy
-      ? t('monitoring.account_inspection_deleted_count')
-      : t('monitoring.account_inspection_delete_count');
-    const disableLabel = hasAutoExecutePolicy
-      ? t('monitoring.account_inspection_disabled_count')
-      : t('monitoring.account_inspection_disable_count');
-    const enableLabel = hasAutoExecutePolicy
-      ? t('monitoring.account_inspection_enabled_count')
-      : t('monitoring.account_inspection_enable_count');
 
     if (!summarySource) {
       return [
         { key: 'sampled', label: t('monitoring.account_inspection_sampled_accounts'), value: '--' },
-        { key: 'delete', label: deleteLabel, value: '--' },
-        { key: 'disable', label: disableLabel, value: '--' },
-        { key: 'enable', label: enableLabel, value: '--' },
+        { key: 'auto', label: t('monitoring.account_inspection_auto_processed_count', { defaultValue: 'Auto processed' }), value: '--' },
+        { key: 'manual', label: t('monitoring.account_inspection_manual_pending_count', { defaultValue: 'Manual pending' }), value: '--' },
         { key: 'keep', label: t('monitoring.account_inspection_keep_count'), value: '--' },
+        { key: 'error', label: t('monitoring.account_inspection_error_count', { defaultValue: 'Errors' }), value: '--' },
       ];
     }
-
-    const deleteCount = hasAutoExecutePolicy ? autoExecutionCounts.delete : summarySource.deleteCount;
-    const disableCount = hasAutoExecutePolicy ? autoExecutionCounts.disable : summarySource.disableCount;
-    const enableCount = hasAutoExecutePolicy ? autoExecutionCounts.enable : summarySource.enableCount;
 
     return [
       {
@@ -1286,32 +1413,67 @@ export function AccountInspectionPage() {
         value: String(summarySource.sampledCount),
       },
       {
-        key: 'delete',
-        label: deleteLabel,
-        value: String(deleteCount),
-        tone: deleteCount > 0 ? 'bad' : 'neutral',
+        key: 'auto',
+        label: t('monitoring.account_inspection_auto_processed_count', { defaultValue: 'Auto processed' }),
+        value: String(actionStats.autoTotal),
+        tone: actionStats.autoTotal > 0 ? 'good' : 'neutral',
       },
       {
-        key: 'disable',
-        label: disableLabel,
-        value: String(disableCount),
-        tone: disableCount > 0 ? 'warn' : 'neutral',
-      },
-      {
-        key: 'enable',
-        label: enableLabel,
-        value: String(enableCount),
-        tone: enableCount > 0 ? 'good' : 'neutral',
+        key: 'manual',
+        label: t('monitoring.account_inspection_manual_pending_count', { defaultValue: 'Manual pending' }),
+        value: String(actionStats.manualTotal),
+        tone: actionStats.manualTotal > 0 ? 'warn' : 'neutral',
       },
       {
         key: 'keep',
         label: t('monitoring.account_inspection_keep_count'),
-        value: String(summarySource.keepCount),
+        value: String(actionStats.keep),
+      },
+      {
+        key: 'error',
+        label: t('monitoring.account_inspection_error_count', { defaultValue: 'Errors' }),
+        value: String(actionStats.error),
+        tone: actionStats.error > 0 ? 'bad' : 'neutral',
       },
     ];
-  }, [autoExecutionCounts, inspectionSettings, progress.summary, result, runStatus, t]);
+  }, [actionStats, progress.summary, result, runStatus, t]);
 
   const pendingActionCount = actionableResults.length;
+
+  const operationPhase = useMemo(() => {
+    if (executing) return t('monitoring.account_inspection_phase_executing', { defaultValue: 'Executing suggested actions' });
+    if (runStatus === 'paused') return t('monitoring.account_inspection_phase_paused', { defaultValue: 'Inspection paused' });
+    if (runStatus === 'running') {
+      if (progress.completed <= 0 && progress.inFlight <= 0) {
+        return t('monitoring.account_inspection_phase_initializing', { defaultValue: 'Preparing account probes' });
+      }
+      return t('monitoring.account_inspection_phase_probing', { defaultValue: 'Probing account health' });
+    }
+    if (runStatus === 'error') return t('monitoring.account_inspection_phase_failed', { defaultValue: 'Inspection failed' });
+    if (result && pendingActionCount > 0) return t('monitoring.account_inspection_phase_review', { defaultValue: 'Review suggested actions' });
+    if (result) return t('monitoring.account_inspection_phase_completed', { defaultValue: 'Inspection completed' });
+    return t('monitoring.account_inspection_phase_idle', { defaultValue: 'Ready to inspect' });
+  }, [executing, pendingActionCount, progress.completed, progress.inFlight, result, runStatus, t]);
+
+  const policySummary = useMemo(() => {
+    const policies: string[] = [];
+    if (inspectionSettings.autoExecuteQuotaLimitDisable) {
+      policies.push(t('monitoring.account_inspection_settings_auto_execute_quota_limit_disable_label'));
+    }
+    if (inspectionSettings.autoExecuteQuotaRecoveryEnable) {
+      policies.push(t('monitoring.account_inspection_settings_auto_execute_quota_recovery_enable_label'));
+    }
+    if (inspectionSettings.autoExecuteAccountErrorAction !== 'none') {
+      policies.push(`${t('monitoring.account_inspection_settings_auto_execute_account_error_action_label')}: ${formatActionLabel(inspectionSettings.autoExecuteAccountErrorAction, t)}`);
+    }
+    return policies.length > 0 ? policies.join(' · ') : t('monitoring.account_inspection_auto_policy_off', { defaultValue: 'Automatic execution is off' });
+  }, [inspectionSettings, t]);
+
+  const resultEmptyMessage = runStatus === 'running'
+    ? t('monitoring.account_inspection_results_generating', { defaultValue: 'Inspection is running. Results will appear as soon as the backend publishes a snapshot.' })
+    : runStatus === 'error'
+      ? t('monitoring.account_inspection_results_error_empty', { defaultValue: 'Unable to complete the inspection. Check logs and retry.' })
+      : t('monitoring.account_inspection_empty');
   const resultFilterTabs = useMemo<Array<{ key: ResultFilter; label: string; count: number }>>(() => [
     { key: 'all', label: t('monitoring.account_inspection_filter_all'), count: allResults.length },
     { key: 'pending', label: t('monitoring.account_inspection_filter_pending'), count: pendingActionCount },
@@ -1481,8 +1643,27 @@ export function AccountInspectionPage() {
       <Card className={styles.heroCard}>
         <div className={styles.heroHeader}>
           <div className={styles.heroCopy}>
+            <span className={styles.heroEyebrow}>{t('monitoring.account_inspection_eyebrow')}</span>
             <h1 className={styles.heroTitle}>{t('monitoring.account_inspection_title')}</h1>
             <p className={styles.heroSubtitle}>{t('monitoring.account_inspection_desc')}</p>
+          </div>
+          <div className={styles.heroActions}>
+            <Button
+              variant="secondary"
+              onClick={handleExportAuthFiles}
+              loading={exportingAuthFiles}
+              disabled={exportingAuthFiles || connectionStatus !== 'connected'}
+            >
+              {t('monitoring.account_inspection_auth_files_export')}
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleRunInspection}
+              loading={runStatus === 'running'}
+              disabled={runStatus === 'running' || executing || connectionStatus !== 'connected'}
+            >
+              {formatRunInspectionButtonLabel(runStatus, t)}
+            </Button>
           </div>
         </div>
       </Card>
@@ -1490,34 +1671,50 @@ export function AccountInspectionPage() {
       <section className={styles.summarySection}>
         <div className={styles.summarySectionHeader}>
           <div>
-            <h2>{t('monitoring.account_inspection_account_summary_title')}</h2>
-            <p>{t('monitoring.account_inspection_account_summary_desc')}</p>
+            <h2>{t('monitoring.account_inspection_asset_overview_title', { defaultValue: 'Account Asset Overview' })}</h2>
+            <p>{t('monitoring.account_inspection_asset_overview_desc', { defaultValue: 'Start from the full account inventory: provider distribution, enabled state, quota exhaustion, and abnormal accounts.' })}</p>
           </div>
-          <Button
-            variant="secondary"
-            onClick={handleExportAuthFiles}
-            loading={exportingAuthFiles}
-            disabled={exportingAuthFiles || connectionStatus !== 'connected'}
-          >
-            {t('monitoring.account_inspection_auth_files_export')}
-          </Button>
         </div>
-        <div className={styles.summaryGrid}>
-          {accountSummaryCards.map((card) => (
-            <Card
-              key={card.key}
-              className={[styles.summaryCard, summaryToneClass[card.tone ?? 'neutral']]
-                .filter(Boolean)
-                .join(' ')}
-            >
-              <span>{card.label}</span>
-              <strong>{card.value}</strong>
-            </Card>
-          ))}
+        <div className={styles.assetOverviewLayout}>
+          <div className={styles.assetMetricGrid}>
+            {accountAssetCards.map((card) => (
+              <Card
+                key={card.key}
+                className={[styles.summaryCard, styles.assetMetricCard, summaryToneClass[card.tone ?? 'neutral']]
+                  .filter(Boolean)
+                  .join(' ')}
+              >
+                <span>{card.label}</span>
+                <strong>{card.value}</strong>
+              </Card>
+            ))}
+          </div>
+          <Card className={styles.providerPanel}>
+            <div className={styles.providerPanelHeader}>
+              <strong>{t('monitoring.account_inspection_provider_distribution_title', { defaultValue: 'Provider Distribution' })}</strong>
+              <span>{authFilesLoaded ? t('monitoring.account_inspection_provider_distribution_desc', { defaultValue: '{{count}} providers detected', count: authFileStats.providerCount }) : t('common.loading')}</span>
+            </div>
+            <div className={styles.providerList}>
+              {authFileStats.providers.length > 0 ? authFileStats.providers.map((provider) => (
+                <div key={provider.provider} className={styles.providerRow}>
+                  <div className={styles.providerNameCell}>
+                    <strong>{resolveProviderDisplayLabel(provider.provider)}</strong>
+                    <span>{`${provider.total} ${t('monitoring.account_inspection_account_total')}`}</span>
+                  </div>
+                  <div className={styles.providerStatusGrid}>
+                    <span>{`${t('monitoring.account_inspection_account_enabled')} ${provider.enabled}`}</span>
+                    <span>{`${t('monitoring.account_inspection_account_disabled')} ${provider.disabled}`}</span>
+                    <span className={provider.quotaLow > 0 ? styles.warningText : undefined}>{`${t('monitoring.account_inspection_account_quota_low')} ${provider.quotaLow}`}</span>
+                    <span className={provider.abnormal > 0 ? styles.errorText : undefined}>{`${t('monitoring.account_inspection_account_abnormal')} ${provider.abnormal}`}</span>
+                  </div>
+                </div>
+              )) : <div className={styles.emptyBlockSmall}>{authFilesLoaded ? t('monitoring.account_inspection_empty') : t('common.loading')}</div>}
+            </div>
+          </Card>
         </div>
       </section>
 
-      <Card className={styles.panel}>
+      <Card className={`${styles.panel} ${styles.controlPanel}`}>
         <div className={styles.panelHeader}>
           <div>
             <h2 className={styles.panelTitle}>{t('monitoring.account_inspection_control_title')}</h2>
@@ -1537,23 +1734,20 @@ export function AccountInspectionPage() {
         <div className={styles.controlLayout}>
           <div className={styles.metaRow}>
             <span className={styles.metaPill}>{`${t('monitoring.account_inspection_target_type')}: ${inspectionSettings.targetType}`}</span>
-            <span className={styles.metaPill}>
-              {`${t('monitoring.account_inspection_schedule_status')}: ${
-                scheduleResponse?.schedule.enabled ? t('common.yes') : t('common.no')
-              }`}
-            </span>
-            <span className={styles.metaPill}>
-              {`${t('monitoring.account_inspection_schedule_next_run')}: ${
-                scheduleResponse?.schedule.enabled && scheduleResponse.schedule.nextRunAt
-                  ? formatTimestamp(scheduleResponse.schedule.nextRunAt, i18n.language)
-                  : '--'
-              }`}
-            </span>
+            <span className={styles.metaPill}>{`${t('monitoring.account_inspection_schedule_status')}: ${scheduleResponse?.schedule.enabled ? t('common.yes') : t('common.no')}`}</span>
+            <span className={styles.metaPill}>{`${t('monitoring.account_inspection_schedule_next_run')}: ${scheduleResponse?.schedule.enabled && scheduleResponse.schedule.nextRunAt ? formatTimestamp(scheduleResponse.schedule.nextRunAt, i18n.language) : '--'}`}</span>
+          </div>
+          <div className={styles.policyBanner}>
+            <strong>{operationPhase}</strong>
+            <span>{policySummary}</span>
           </div>
 
           <div className={styles.progressSection}>
             <div className={styles.progressHeader}>
-              <strong>{t('monitoring.account_inspection_progress_title')}</strong>
+              <div>
+                <strong>{t('monitoring.account_inspection_progress_title')}</strong>
+                <small>{progressLabel}</small>
+              </div>
               <span>{`${progress.percent}%`}</span>
             </div>
             <div className={styles.progressTrack}>
@@ -1561,30 +1755,23 @@ export function AccountInspectionPage() {
             </div>
             <div className={styles.progressFooter}>
               <div className={styles.progressMeta}>
-                <span>{progressLabel}</span>
+                <span>{`${t('monitoring.account_inspection_workers')}: ${inspectionSettings.workers}`}</span>
+                <span>{`${t('monitoring.account_inspection_sample_size')}: ${inspectionSettings.sampleSize || t('monitoring.account_inspection_all_accounts', { defaultValue: 'All' })}`}</span>
                 {runStatus === 'paused' ? <strong>{t('monitoring.account_inspection_paused')}</strong> : null}
               </div>
               <div className={styles.progressActions}>
                 <Button
-                  variant="secondary"
+                  variant="primary"
                   onClick={handleRunInspection}
                   loading={runStatus === 'running'}
                   disabled={runStatus === 'running' || executing || connectionStatus !== 'connected'}
                 >
                   {formatRunInspectionButtonLabel(runStatus, t)}
                 </Button>
-                <Button
-                  variant="secondary"
-                  onClick={handlePauseInspection}
-                  disabled={runStatus !== 'running' || executing}
-                >
+                <Button variant="secondary" onClick={handlePauseInspection} disabled={runStatus !== 'running' || executing}>
                   {t('monitoring.account_inspection_pause')}
                 </Button>
-                <Button
-                  variant="danger"
-                  onClick={handleStopInspection}
-                  disabled={(runStatus !== 'running' && runStatus !== 'paused') || executing}
-                >
+                <Button variant="danger" onClick={handleStopInspection} disabled={(runStatus !== 'running' && runStatus !== 'paused') || executing}>
                   {t('monitoring.account_inspection_stop')}
                 </Button>
               </div>
@@ -1613,6 +1800,24 @@ export function AccountInspectionPage() {
             </Card>
           ))}
         </div>
+        <div className={styles.actionBreakdownGrid}>
+          <Card className={styles.actionBreakdownCard}>
+            <strong>{t('monitoring.account_inspection_auto_execution_breakdown', { defaultValue: 'Automatic policy execution' })}</strong>
+            <div>
+              <span>{`${t('monitoring.account_inspection_action_delete')}: ${actionStats.autoDelete}`}</span>
+              <span>{`${t('monitoring.account_inspection_action_disable')}: ${actionStats.autoDisable}`}</span>
+              <span>{`${t('monitoring.account_inspection_action_enable')}: ${actionStats.autoEnable}`}</span>
+            </div>
+          </Card>
+          <Card className={styles.actionBreakdownCard}>
+            <strong>{t('monitoring.account_inspection_manual_execution_breakdown', { defaultValue: 'Manual review queue' })}</strong>
+            <div>
+              <span>{`${t('monitoring.account_inspection_action_delete')}: ${actionStats.manualDelete}`}</span>
+              <span>{`${t('monitoring.account_inspection_action_disable')}: ${actionStats.manualDisable}`}</span>
+              <span>{`${t('monitoring.account_inspection_action_enable')}: ${actionStats.manualEnable}`}</span>
+            </div>
+          </Card>
+        </div>
       </section>
 
       <Card className={styles.panel}>
@@ -1635,9 +1840,7 @@ export function AccountInspectionPage() {
               loading={executing}
               disabled={!result || runStatus === 'running' || executing || pendingActionCount === 0}
             >
-              {executing
-                ? t('monitoring.account_inspection_executing')
-                : t('monitoring.account_inspection_execute_now')}
+              {executing ? t('monitoring.account_inspection_executing') : t('monitoring.account_inspection_execute_now')}
             </Button>
           </div>
         </div>
@@ -1649,7 +1852,7 @@ export function AccountInspectionPage() {
                 <button
                   key={tab.key}
                   type="button"
-                  className={[styles.filterTab, resultFilter === tab.key ? styles.filterTabActive : '']
+                  className={[styles.filterTab, resultFilterWithFallback === tab.key ? styles.filterTabActive : '']
                     .filter(Boolean)
                     .join(' ')}
                   onClick={() => setResultFilter(tab.key)}
@@ -1658,6 +1861,42 @@ export function AccountInspectionPage() {
                   <strong>{tab.count}</strong>
                 </button>
               ))}
+            </div>
+
+            <div className={styles.resultCards}>
+              {filteredResults.length > 0 ? filteredResults.map((item) => {
+                const healthStatus = resolveResultHealthStatus(item);
+                const manualActions = getManualActions(item);
+                return (
+                  <article key={item.key} className={styles.resultCard}>
+                    <div className={styles.resultCardHeader}>
+                      <div className={styles.primaryCell}>
+                        <span>{item.fileName}</span>
+                        <small>{item.provider}</small>
+                      </div>
+                      <span className={`${styles.healthBadge} ${healthToneClass[healthStatus]}`}>{t(healthLabelKey[healthStatus])}</span>
+                    </div>
+                    <div className={styles.resultCardGrid}>
+                      <span>{t('monitoring.account_inspection_current_state')}</span><strong>{formatCurrentStateLabel(item, t)}</strong>
+                      <span>{t('monitoring.account_inspection_http_status')}</span><strong>{item.statusCode === null ? '--' : item.statusCode}</strong>
+                      <span>{t('monitoring.account_inspection_used_percent')}</span><strong>{formatPercent(item.usedPercent)}</strong>
+                      <span>{t('monitoring.account_inspection_next_action')}</span><strong>{formatActionLabel(item.action, t)}</strong>
+                    </div>
+                    <p>{item.actionReason}</p>
+                    {item.error ? <p className={styles.errorText}>{item.error}</p> : null}
+                    <div className={styles.operationActions}>
+                      <Button size="sm" variant="secondary" onClick={() => void handleRecheckSingle(item)} loading={recheckingKey === item.key} disabled={runStatus === 'running' || executing || recheckingKey !== null}>
+                        {t('monitoring.account_inspection_recheck_account', { defaultValue: 'Recheck' })}
+                      </Button>
+                      {manualActions.length > 0 ? manualActions.map((action) => (
+                        <Button key={action} size="sm" variant={action === 'delete' ? 'danger' : 'secondary'} onClick={() => handleExecuteSingle(item, action)} disabled={runStatus === 'running' || executing || recheckingKey !== null}>
+                          {formatActionLabel(action, t)}
+                        </Button>
+                      )) : null}
+                    </div>
+                  </article>
+                );
+              }) : <div className={styles.emptyBlockSmall}>{t('monitoring.account_inspection_no_filtered_results')}</div>}
             </div>
 
             <div className={styles.tableWrap}>
@@ -1693,62 +1932,44 @@ export function AccountInspectionPage() {
                       const manualActions = getManualActions(item);
                       return (
                         <tr key={item.key}>
-                          <td>
-                            <div className={styles.primaryCell}>
-                              <span>{item.fileName}</span>
-                              <small>{item.provider}</small>
-                            </div>
-                          </td>
-                          <td>
-                            <span className={`${styles.healthBadge} ${healthToneClass[healthStatus]}`}>
-                              {t(healthLabelKey[healthStatus])}
-                            </span>
-                          </td>
+                          <td><div className={styles.primaryCell}><span>{item.fileName}</span><small>{item.provider}</small></div></td>
+                          <td><span className={`${styles.healthBadge} ${healthToneClass[healthStatus]}`}>{t(healthLabelKey[healthStatus])}</span></td>
                           <td>{formatCurrentStateLabel(item, t)}</td>
                           <td>{item.statusCode === null ? '--' : item.statusCode}</td>
                           <td>{formatPercent(item.usedPercent)}</td>
-                          <td>
-                            <span className={`${styles.actionBadge} ${actionToneClass[item.action]}`}>
-                              {formatActionLabel(item.action, t)}
-                            </span>
-                          </td>
+                          <td><span className={`${styles.actionBadge} ${actionToneClass[item.action]}`}>{formatActionLabel(item.action, t)}</span></td>
                           <td>{item.actionReason}</td>
                           <td className={item.error ? styles.errorText : styles.mutedText}>{item.error || '--'}</td>
                           <td>
-                            {manualActions.length > 0 ? (
-                              <div className={styles.operationActions}>
-                                {manualActions.map((action) => (
-                                  <Button
-                                    key={action}
-                                    size="sm"
-                                    variant={action === 'delete' ? 'danger' : 'secondary'}
-                                    onClick={() => handleExecuteSingle(item, action)}
-                                    disabled={runStatus === 'running' || executing}
-                                  >
-                                    {formatActionLabel(action, t)}
-                                  </Button>
-                                ))}
-                              </div>
-                            ) : (
-                              <span className={styles.mutedText}>--</span>
-                            )}
+                            <div className={styles.operationActions}>
+                              <Button size="sm" variant="secondary" onClick={() => void handleRecheckSingle(item)} loading={recheckingKey === item.key} disabled={runStatus === 'running' || executing || recheckingKey !== null}>
+                                {t('monitoring.account_inspection_recheck_account', { defaultValue: 'Recheck' })}
+                              </Button>
+                              {manualActions.map((action) => (
+                                <Button key={action} size="sm" variant={action === 'delete' ? 'danger' : 'secondary'} onClick={() => handleExecuteSingle(item, action)} disabled={runStatus === 'running' || executing || recheckingKey !== null}>
+                                  {formatActionLabel(action, t)}
+                                </Button>
+                              ))}
+                            </div>
                           </td>
                         </tr>
                       );
                     })
                   ) : (
-                    <tr>
-                      <td colSpan={9}>
-                        <div className={styles.emptyBlockSmall}>{t('monitoring.account_inspection_no_filtered_results')}</div>
-                      </td>
-                    </tr>
+                    <tr><td colSpan={9}><div className={styles.emptyBlockSmall}>{t('monitoring.account_inspection_no_filtered_results')}</div></td></tr>
                   )}
                 </tbody>
               </table>
             </div>
           </>
         ) : (
-          <div className={styles.emptyBlock}>{t('monitoring.account_inspection_empty')}</div>
+          <div className={styles.emptyState}>
+            <strong>{resultEmptyMessage}</strong>
+            <span>{connectionStatus === 'connected' ? t('monitoring.account_inspection_empty_hint', { defaultValue: 'Start an inspection to generate account health and suggested actions.' }) : t('notification.connection_required')}</span>
+            <Button variant="primary" onClick={handleRunInspection} disabled={connectionStatus !== 'connected'}>
+              {t('monitoring.account_inspection_run')}
+            </Button>
+          </div>
         )}
       </Card>
 
@@ -1761,51 +1982,29 @@ export function AccountInspectionPage() {
           <div className={styles.panelActions}>
             <div className={styles.logLevelTabs}>
               {logLevelOptions.map((option) => (
-                <button
-                  key={option.key}
-                  type="button"
-                  className={[styles.logLevelTab, logLevelFilter === option.key ? styles.logLevelTabActive : '']
-                    .filter(Boolean)
-                    .join(' ')}
-                  onClick={() => setLogLevelFilter(option.key)}
-                >
+                <button key={option.key} type="button" className={[styles.logLevelTab, logLevelFilter === option.key ? styles.logLevelTabActive : ''].filter(Boolean).join(' ')} onClick={() => setLogLevelFilter(option.key)}>
                   {option.label}
                 </button>
               ))}
             </div>
-            <button
-              type="button"
-              className={styles.foldButton}
-              onClick={() => setLogsCollapsed((previous) => !previous)}
-              disabled={logs.length === 0}
-            >
+            <button type="button" className={styles.foldButton} onClick={() => setLogsCollapsed((previous) => !previous)} disabled={logs.length === 0}>
               {logsCollapsed ? <IconChevronDown size={16} /> : <IconChevronUp size={16} />}
-              <span>
-                {logsCollapsed
-                  ? t('monitoring.account_inspection_expand_logs')
-                  : t('monitoring.account_inspection_fold_logs')}
-              </span>
+              <span>{logsCollapsed ? t('monitoring.account_inspection_expand_logs') : t('monitoring.account_inspection_fold_logs')}</span>
             </button>
           </div>
         </div>
 
         {!logsCollapsed ? (
           <div ref={logListRef} className={styles.logList}>
-            {filteredLogs.length > 0 ? (
-              filteredLogs.map((entry) => (
-                <div key={entry.id} className={`${styles.logRow} ${levelClassMap[entry.level]}`}>
-                  <span className={styles.logTime}>{formatTimestamp(entry.timestamp, i18n.language)}</span>
-                  <span className={styles.logMessage}>{entry.message}</span>
-                </div>
-              ))
-            ) : (
-              <div className={styles.emptyBlock}>{t('monitoring.account_inspection_logs_empty')}</div>
-            )}
+            {filteredLogs.length > 0 ? filteredLogs.map((entry) => (
+              <div key={entry.id} className={`${styles.logRow} ${levelClassMap[entry.level]}`}>
+                <span className={styles.logTime}>{formatTimestamp(entry.timestamp, i18n.language)}</span>
+                <span className={styles.logMessage}>{entry.message}</span>
+              </div>
+            )) : <div className={styles.emptyBlock}>{t('monitoring.account_inspection_logs_empty')}</div>}
           </div>
         ) : (
-          <div className={styles.logCollapsedBar}>
-            <span>{t('monitoring.account_inspection_logs_collapsed', { count: filteredLogs.length })}</span>
-          </div>
+          <div className={styles.logCollapsedBar}><span>{t('monitoring.account_inspection_logs_collapsed', { count: filteredLogs.length })}</span></div>
         )}
       </Card>
 

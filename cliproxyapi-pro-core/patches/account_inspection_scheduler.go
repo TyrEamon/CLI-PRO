@@ -56,6 +56,7 @@ var accountInspectionSupportedProviders = map[string]struct{}{
 	"codex":       {},
 	"gemini-cli":  {},
 	"kimi":        {},
+	"xai":         {},
 }
 
 var accountInspectionSchedulers sync.Map
@@ -228,6 +229,10 @@ type accountInspectionActionItem struct {
 
 type accountInspectionActionRequest struct {
 	Items []accountInspectionActionItem `json:"items"`
+}
+
+type accountInspectionOneRequest struct {
+	Item accountInspectionActionItem `json:"item"`
 }
 
 type accountInspectionActionOutcome struct {
@@ -687,6 +692,91 @@ func (s *accountInspectionScheduler) stopRun() {
 	}
 }
 
+func (s *accountInspectionScheduler) inspectOne(item accountInspectionActionItem) error {
+	ctx, cancel := context.WithTimeout(context.Background(), accountInspectionMaxRunDuration)
+	s.mu.Lock()
+	if s.isRunningLocked() {
+		s.mu.Unlock()
+		cancel()
+		return fmt.Errorf("account inspection already running")
+	}
+	s.cancel = cancel
+	s.setRunStateLocked(accountInspectionStateRunning)
+	s.status.LastStartedAt = time.Now().UnixMilli()
+	s.status.LastFinishedAt = 0
+	s.status.LastError = ""
+	s.status.Progress = accountInspectionProgress{Total: 1, Completed: 0, InFlight: 0, Pending: 1}
+	s.status.Summary = accountInspectionSummary{}
+	s.status.Logs = nil
+	s.status.Results = nil
+	schedule := s.schedule
+	s.mu.Unlock()
+
+	go func() {
+		defer cancel()
+		result, summary, runErr := s.executeSingleInspection(ctx, schedule.Settings, item)
+		finishedAt := time.Now().UnixMilli()
+		state := accountInspectionStateCompleted
+		if runErr != nil {
+			if errors.Is(runErr, context.Canceled) {
+				state = accountInspectionStateStopped
+			} else if errors.Is(runErr, context.DeadlineExceeded) {
+				state = accountInspectionStatePartial
+			} else {
+				state = accountInspectionStateFailed
+			}
+		}
+
+		s.mu.Lock()
+		s.setRunStateLocked(state)
+		s.status.LastFinishedAt = finishedAt
+		s.status.Summary = summary
+		if result.Key != "" {
+			s.status.Results = []accountInspectionResult{result}
+		} else {
+			s.status.Results = nil
+		}
+		s.status.Progress.Completed = len(s.status.Results)
+		s.status.Progress.InFlight = 0
+		s.status.Progress.Pending = 0
+		if runErr != nil {
+			s.status.LastError = runErr.Error()
+		} else {
+			s.status.LastError = ""
+		}
+		s.cancel = nil
+		broadcast := s.statusBroadcastLocked(true)
+		s.mu.Unlock()
+		broadcast.send()
+	}()
+	return nil
+}
+
+func (s *accountInspectionScheduler) executeSingleInspection(ctx context.Context, settings accountInspectionSettings, item accountInspectionActionItem) (accountInspectionResult, accountInspectionSummary, error) {
+	auths, err := s.auths()
+	if err != nil {
+		return accountInspectionResult{}, accountInspectionSummary{}, err
+	}
+	for _, auth := range auths {
+		account := accountFromAuth(auth)
+		if item.Key != "" && account.Key != item.Key {
+			continue
+		}
+		if item.Key == "" && (account.FileName != item.FileName || account.AuthIndex != item.AuthIndex) {
+			continue
+		}
+		if !shouldInspectAccount(account, accountInspectionProviderAll) {
+			return accountInspectionResult{}, accountInspectionSummary{}, fmt.Errorf("unsupported provider")
+		}
+		s.appendLog("info", fmt.Sprintf("重新检查 %s", account.identity()))
+		s.updateProgress(1, 0, 1, true)
+		result := s.inspectAccount(ctx, account, settings, make(chan struct{}, accountInspectionMaxRefreshConcurrency))
+		s.updateProgress(1, 1, 0, true)
+		return result, summarizeAccountInspection(len(auths), 1, []accountInspectionAccount{account}, []accountInspectionResult{result}), nil
+	}
+	return accountInspectionResult{}, accountInspectionSummary{}, fmt.Errorf("account not found")
+}
+
 func (s *accountInspectionScheduler) run(ctx context.Context, cancel context.CancelFunc, schedule accountInspectionSchedule, manual bool) {
 	defer cancel()
 	s.appendLog("info", "后端账号巡检开始")
@@ -1072,6 +1162,8 @@ func (s *accountInspectionScheduler) inspectAccount(ctx context.Context, account
 		decision, statusCode, err = s.inspectGeminiCLI(ctx, account, settings, s.appendLog)
 	case "kimi":
 		decision, statusCode, err = s.inspectKimi(ctx, account, settings, s.appendLog)
+	case "xai":
+		decision, statusCode, err = s.inspectXAI(ctx, account, settings)
 	default:
 		result.ActionReason = "暂不支持该 provider 巡检"
 		result.Error = "unsupported provider"
@@ -1425,6 +1517,38 @@ func (s *accountInspectionScheduler) inspectKimi(ctx context.Context, account ac
 	}
 	s.persistQuotaState(ctx, account, quotaSuccessState(map[string]any{"rows": rows}), appendLog)
 	return quotaDecision(account, used, len(rows) > 0, settings.UsedPercentThreshold), status, nil
+}
+
+func (s *accountInspectionScheduler) inspectXAI(ctx context.Context, account accountInspectionAccount, settings accountInspectionSettings) (accountInspectionDecision, *int, error) {
+	baseURL := xaiAPIBaseURL(account.Auth)
+	resp, err := s.withRetry(ctx, settings.Retries, func() (accountInspectionHTTPResult, error) {
+		return s.apiCall(ctx, account.Auth, http.MethodGet, strings.TrimRight(baseURL, "/")+"/models", map[string]string{
+			"Authorization": "Bearer $TOKEN$",
+			"Accept":        "application/json",
+		}, "", settings.Timeout)
+	})
+	status := intPtr(resp.StatusCode)
+	if err != nil {
+		return accountInspectionDecision{}, status, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if isAccountErrorStatus(resp.StatusCode) {
+			return authErrorDecision(account, resp.StatusCode), status, nil
+		}
+		return accountInspectionDecision{}, status, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	if account.Disabled {
+		return accountInspectionDecision{Action: accountInspectionActionEnable, ActionReason: "账号可用，建议重新启用"}, status, nil
+	}
+	return accountInspectionDecision{Action: accountInspectionActionKeep, ActionReason: "账号可用，无需处理"}, status, nil
+}
+
+func xaiAPIBaseURL(auth *coreauth.Auth) string {
+	baseURL := firstNonEmptyAuthValue(auth, "base_url", "baseURL", "api_base_url", "apiBaseURL")
+	if baseURL == "" {
+		return "https://api.x.ai/v1"
+	}
+	return baseURL
 }
 
 func (s *accountInspectionScheduler) antigravityUserAgent() string {
@@ -2885,6 +3009,7 @@ func (h *Handler) RegisterAccountInspectionRoutes(group *gin.RouterGroup) {
 	group.PATCH("/account-inspection/schedule", h.PutAccountInspectionSchedule)
 	group.GET("/account-inspection/status", h.GetAccountInspectionStatus)
 	group.POST("/account-inspection/run", h.RunAccountInspection)
+	group.POST("/account-inspection/inspect-one", h.InspectOneAccount)
 	group.POST("/account-inspection/pause", h.PauseAccountInspection)
 	group.POST("/account-inspection/resume", h.ResumeAccountInspection)
 	group.POST("/account-inspection/stop", h.StopAccountInspection)
@@ -2925,6 +3050,24 @@ func (h *Handler) RunAccountInspection(c *gin.Context) {
 		return
 	}
 	if err := scheduler.startRun(true); err != nil {
+		c.JSON(http.StatusConflict, scheduler.snapshot())
+		return
+	}
+	c.JSON(http.StatusAccepted, scheduler.snapshot())
+}
+
+func (h *Handler) InspectOneAccount(c *gin.Context) {
+	scheduler := schedulerForHandler(h)
+	if scheduler == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "account inspection scheduler unavailable"})
+		return
+	}
+	var request accountInspectionOneRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	if err := scheduler.inspectOne(request.Item); err != nil {
 		c.JSON(http.StatusConflict, scheduler.snapshot())
 		return
 	}

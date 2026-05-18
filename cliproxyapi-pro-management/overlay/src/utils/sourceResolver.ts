@@ -26,6 +26,7 @@ const PROVIDER_DISPLAY_LABELS: Record<string, string> = {
   'gemini-cli': 'Gemini CLI',
   kimi: 'Kimi',
   vertex: 'Vertex',
+  xai: 'xAI',
 };
 
 export const resolveProviderDisplayLabel = (provider: string) => PROVIDER_DISPLAY_LABELS[provider] ?? provider;

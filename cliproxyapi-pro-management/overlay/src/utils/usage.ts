@@ -212,6 +212,37 @@ const normalizeSourceWithCache = (sourceCache: Map<string, string>, value: unkno
   return normalized;
 };
 
+const buildUsageDetail = (
+  detailRaw: unknown,
+  modelName: string,
+  sourceCache: Map<string, string>
+): UsageDetail | null => {
+  if (!isRecord(detailRaw) || typeof detailRaw.timestamp !== 'string') return null;
+
+  const timestamp = detailRaw.timestamp;
+  const timestampMs = parseTimestampMs(timestamp);
+  const latencyMs = extractLatencyMs(detailRaw);
+
+  return {
+    timestamp,
+    source: normalizeSourceWithCache(sourceCache, detailRaw.source),
+    auth_index: (detailRaw.auth_index ??
+      detailRaw.authIndex ??
+      detailRaw.AuthIndex ??
+      null) as UsageDetail['auth_index'],
+    api_key_hash: typeof detailRaw.api_key_hash === 'string'
+      ? detailRaw.api_key_hash
+      : typeof detailRaw.apiKeyHash === 'string'
+        ? detailRaw.apiKeyHash
+        : undefined,
+    latency_ms: latencyMs ?? undefined,
+    tokens: readTokens(detailRaw),
+    failed: detailRaw.failed === true,
+    __modelName: modelName,
+    __timestampMs: Number.isNaN(timestampMs) ? 0 : timestampMs,
+  };
+};
+
 export function collectUsageDetails(usageData: unknown): UsageDetail[] {
   const cacheKey = isRecord(usageData) ? (usageData as object) : null;
   if (cacheKey) {
@@ -235,28 +266,8 @@ export function collectUsageDetails(usageData: unknown): UsageDetail[] {
       const modelDetails = Array.isArray(modelEntry.details) ? modelEntry.details : [];
 
       modelDetails.forEach((detailRaw) => {
-        if (!isRecord(detailRaw) || typeof detailRaw.timestamp !== 'string') return;
-        const timestamp = detailRaw.timestamp;
-        const timestampMs = parseTimestampMs(timestamp);
-        const latencyMs = extractLatencyMs(detailRaw);
-        details.push({
-          timestamp,
-          source: normalizeSourceWithCache(sourceCache, detailRaw.source),
-          auth_index: (detailRaw.auth_index ??
-            detailRaw.authIndex ??
-            detailRaw.AuthIndex ??
-            null) as UsageDetail['auth_index'],
-          api_key_hash: typeof detailRaw.api_key_hash === 'string'
-            ? detailRaw.api_key_hash
-            : typeof detailRaw.apiKeyHash === 'string'
-              ? detailRaw.apiKeyHash
-              : undefined,
-          latency_ms: latencyMs ?? undefined,
-          tokens: readTokens(detailRaw),
-          failed: detailRaw.failed === true,
-          __modelName: modelName,
-          __timestampMs: Number.isNaN(timestampMs) ? 0 : timestampMs,
-        });
+        const detail = buildUsageDetail(detailRaw, modelName, sourceCache);
+        if (detail) details.push(detail);
       });
     });
   });
@@ -292,30 +303,14 @@ export function collectUsageDetailsWithEndpoint(usageData: unknown): UsageDetail
       const modelDetails = Array.isArray(modelEntry.details) ? modelEntry.details : [];
 
       modelDetails.forEach((detailRaw) => {
-        if (!isRecord(detailRaw) || typeof detailRaw.timestamp !== 'string') return;
-        const timestamp = detailRaw.timestamp;
-        const timestampMs = parseTimestampMs(timestamp);
-        const latencyMs = extractLatencyMs(detailRaw);
+        const detail = buildUsageDetail(detailRaw, modelName, sourceCache);
+        if (!detail) return;
         details.push({
-          timestamp,
-          source: normalizeSourceWithCache(sourceCache, detailRaw.source),
-          auth_index: (detailRaw.auth_index ??
-            detailRaw.authIndex ??
-            detailRaw.AuthIndex ??
-            null) as UsageDetail['auth_index'],
-          api_key_hash: typeof detailRaw.api_key_hash === 'string'
-            ? detailRaw.api_key_hash
-            : typeof detailRaw.apiKeyHash === 'string'
-              ? detailRaw.apiKeyHash
-              : undefined,
-          latency_ms: latencyMs ?? undefined,
-          tokens: readTokens(detailRaw),
-          failed: detailRaw.failed === true,
-          __modelName: modelName,
+          ...detail,
           __endpoint: endpoint,
           __endpointMethod: endpointMethod,
           __endpointPath: endpointPath,
-          __timestampMs: Number.isNaN(timestampMs) ? 0 : timestampMs,
+          __timestampMs: detail.__timestampMs ?? 0,
         });
       });
     });

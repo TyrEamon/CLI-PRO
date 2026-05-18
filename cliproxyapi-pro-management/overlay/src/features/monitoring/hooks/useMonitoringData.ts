@@ -5,6 +5,7 @@ import type { AuthFileItem } from '@/types/authFile';
 import type { Config } from '@/types/config';
 import type { CredentialInfo } from '@/types/sourceInfo';
 import { sha256Hex } from '@/utils/hash';
+import { isRecordValue, readBooleanValue, readStringValue } from '@/utils/quota';
 import { buildSourceInfoMap, resolveSourceDisplay, type SourceInfoMapInput } from '@/utils/sourceResolver';
 import {
   calculateCost,
@@ -15,21 +16,25 @@ import {
   type UsageDetailWithEndpoint,
 } from '@/utils/usage';
 
-type RecordLike = Record<string, unknown>;
-
-const isRecord = (value: unknown): value is RecordLike =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
+const isRecord = isRecordValue;
+const readString = readStringValue;
+const parseBoolean = readBooleanValue;
 
 const padNumber = (value: number) => String(value).padStart(2, '0');
 
-const buildLocalDayKey = (timestampMs: number) => {
+export const buildLocalDayKey = (timestampMs: number) => {
   const date = new Date(timestampMs);
   return `${date.getFullYear()}-${padNumber(date.getMonth() + 1)}-${padNumber(date.getDate())}`;
 };
 
-const buildHourLabel = (timestampMs: number) => `${padNumber(new Date(timestampMs).getHours())}:00`;
+export const buildHourLabel = (timestampMs: number) => `${padNumber(new Date(timestampMs).getHours())}:00`;
 
-const buildDayLabel = (dayKey: string) => dayKey.slice(5).replace('-', '/');
+export const buildDayLabel = (dayKey: string) => dayKey.slice(5).replace('-', '/');
+
+export const formatShortDateTime = (timestampMs: number) => {
+  const date = new Date(timestampMs);
+  return `${date.getMonth() + 1}/${date.getDate()} ${padNumber(date.getHours())}:${padNumber(date.getMinutes())}`;
+};
 
 const startOfTodayMs = (nowMs: number) => {
   const now = new Date(nowMs);
@@ -37,7 +42,7 @@ const startOfTodayMs = (nowMs: number) => {
   return now.getTime();
 };
 
-const getRangeStartMs = (range: MonitoringTimeRange, nowMs: number) => {
+export const getRangeStartMs = (range: MonitoringTimeRange, nowMs: number) => {
   const todayStart = startOfTodayMs(nowMs);
 
   switch (range) {
@@ -83,22 +88,6 @@ const maskClientApiKey = (value: string) => {
   return `${trimmed.slice(0, visibleChars)}${'*'.repeat(Math.max(10 - visibleChars * 2, 1))}${trimmed.slice(-visibleChars)}`;
 };
 
-const parseBoolean = (value: unknown) => {
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'number') return value !== 0;
-  if (typeof value === 'string') {
-    const normalized = value.trim().toLowerCase();
-    return ['1', 'true', 'yes', 'on'].includes(normalized);
-  }
-  return false;
-};
-
-const readString = (value: unknown) => {
-  if (value === null || value === undefined) return '';
-  const text = String(value).trim();
-  return text;
-};
-
 const extractArrayPayload = (payload: unknown, key: string): unknown[] => {
   if (Array.isArray(payload)) return payload;
   if (!isRecord(payload)) return [];
@@ -117,7 +106,7 @@ const extractHost = (baseUrl: string) => {
   }
 };
 
-const joinUnique = (values: Iterable<string>, limit = 3) => {
+export const joinUnique = (values: Iterable<string>, limit = 3) => {
   const unique = Array.from(new Set(Array.from(values).map((value) => value.trim()).filter(Boolean)));
   if (unique.length <= limit) {
     return unique.join(', ');
@@ -389,7 +378,7 @@ export type MonitoringAccountRow = {
   averageLatencyMs: number | null;
   lastSeenAt: number;
   recentPattern: boolean[];
-  rows: MonitoringEventRow[];
+  rows?: MonitoringEventRow[];
   models: MonitoringAccountModelSpendRow[];
 };
 
@@ -736,8 +725,10 @@ export const buildMonitoringSummary = (rows: MonitoringEventRow[]): MonitoringSu
 
 export const buildAccountRows = (
   rows: MonitoringEventRow[],
-  groupBy: MonitoringAccountGroupBy = 'account'
+  groupBy: MonitoringAccountGroupBy = 'account',
+  options: { includeRows?: boolean } = {}
 ): MonitoringAccountRow[] => {
+  const includeRows = options.includeRows === true;
   const grouped = new Map<
     string,
     {
@@ -836,7 +827,9 @@ export const buildAccountRows = (
       lastSeenAt: 0,
     };
 
-    existing.rows.push(row);
+    if (includeRows) {
+      existing.rows.push(row);
+    }
     existing.authLabels.add(row.authLabel);
     existing.authIndices.add(row.authIndexMasked);
     existing.channels.add(row.channel);
@@ -907,8 +900,8 @@ export const buildAccountRows = (
       totalCost: item.totalCost,
       averageLatencyMs: item.latencyCount > 0 ? item.latencySum / item.latencyCount : null,
       lastSeenAt: item.lastSeenAt,
-      recentPattern: buildRecentPattern(item.rows),
-      rows: item.rows,
+      recentPattern: includeRows ? buildRecentPattern(item.rows) : [],
+      rows: includeRows ? item.rows : undefined,
       models: Array.from(item.modelMap.values())
         .map((model) => ({
           ...model,

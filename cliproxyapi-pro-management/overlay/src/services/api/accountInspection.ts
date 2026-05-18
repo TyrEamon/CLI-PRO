@@ -32,6 +32,13 @@ export type AccountInspectionActionOutcome = {
   error: string;
 };
 
+export type AccountInspectionInspectOneItem = Pick<
+  AccountInspectionResultItem,
+  'key' | 'provider' | 'fileName' | 'email' | 'name' | 'authIndex' | 'disabled'
+> & {
+  displayName: string;
+};
+
 export type AccountInspectionActionItem = Pick<
   AccountInspectionResultItem,
   'key' | 'provider' | 'fileName' | 'email' | 'name' | 'authIndex' | 'disabled'
@@ -64,6 +71,8 @@ export const accountInspectionApi = {
   updateSchedule: (schedule: AccountInspectionSchedule) =>
     apiClient.put<AccountInspectionScheduleResponse>('/account-inspection/schedule', schedule),
   runNow: () => apiClient.post<AccountInspectionScheduleResponse>('/account-inspection/run', {}),
+  inspectOne: (item: AccountInspectionInspectOneItem) =>
+    apiClient.post<AccountInspectionScheduleResponse>('/account-inspection/inspect-one', { item }),
   pause: () => apiClient.post<AccountInspectionScheduleResponse>('/account-inspection/pause', {}),
   resume: () => apiClient.post<AccountInspectionScheduleResponse>('/account-inspection/resume', {}),
   stop: () => apiClient.post<AccountInspectionScheduleResponse>('/account-inspection/stop', {}),

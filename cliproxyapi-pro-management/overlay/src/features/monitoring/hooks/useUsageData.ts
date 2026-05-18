@@ -106,6 +106,7 @@ export function useUsageData(): UseUsageDataReturn {
   const requestIdRef = useRef(0);
   const latestIdRef = useRef(0);
   const incrementalLoadingRef = useRef(false);
+  const incrementalPendingRef = useRef(false);
 
   const loadUsage = useCallback(async () => {
     const requestId = requestIdRef.current + 1;
@@ -130,24 +131,33 @@ export function useUsageData(): UseUsageDataReturn {
   }, []);
 
   const loadUsageIncremental = useCallback(async () => {
-    if (incrementalLoadingRef.current) return;
-    const afterId = latestIdRef.current;
-    if (afterId <= 0) {
-      await loadUsage();
+    if (incrementalLoadingRef.current) {
+      incrementalPendingRef.current = true;
       return;
     }
 
     incrementalLoadingRef.current = true;
     try {
-      const payload = await apiClient.get<UsagePayload>(`/usage/events?after_id=${afterId}&limit=5000`);
-      const nextLatestId = toNumber(payload?.latest_id);
-      if (nextLatestId > latestIdRef.current) {
-        latestIdRef.current = nextLatestId;
-        setUsage((current) => mergeUsagePayload(current, payload ?? null));
-        setLastRefreshedAt(new Date());
-      }
-    } catch {
-      await loadUsage();
+      do {
+        incrementalPendingRef.current = false;
+        const afterId = latestIdRef.current;
+        if (afterId <= 0) {
+          await loadUsage();
+          continue;
+        }
+
+        try {
+          const payload = await apiClient.get<UsagePayload>(`/usage/events?after_id=${afterId}&limit=5000`);
+          const nextLatestId = toNumber(payload?.latest_id);
+          if (nextLatestId > latestIdRef.current) {
+            latestIdRef.current = nextLatestId;
+            setUsage((current) => mergeUsagePayload(current, payload ?? null));
+            setLastRefreshedAt(new Date());
+          }
+        } catch {
+          await loadUsage();
+        }
+      } while (incrementalPendingRef.current);
     } finally {
       incrementalLoadingRef.current = false;
     }

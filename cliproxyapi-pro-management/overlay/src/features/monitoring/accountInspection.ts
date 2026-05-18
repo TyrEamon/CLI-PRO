@@ -88,8 +88,6 @@ export interface AccountInspectionProgressSummary {
 }
 
 export interface AccountInspectionRunResult {
-  settings: AccountInspectionSettings;
-  files: AuthFileItem[];
   results: AccountInspectionResultItem[];
   summary: AccountInspectionSummary;
   startedAt: number;
@@ -186,6 +184,7 @@ export const ACCOUNT_INSPECTION_SUPPORTED_PROVIDERS = [
   'codex',
   'gemini-cli',
   'kimi',
+  'xai',
 ] as const;
 
 export type AccountInspectionSupportedProvider = typeof ACCOUNT_INSPECTION_SUPPORTED_PROVIDERS[number];
@@ -526,6 +525,31 @@ export const accountInspectionBackendRunStatus = (
   return 'idle';
 };
 
+const buildAccountInspectionBackendRunResult = (
+  response: AccountInspectionBackendResponse,
+  results: AccountInspectionResultItem[],
+  startedAt: number,
+  finishedAt: number
+): AccountInspectionRunResult | null => {
+  if (results.length === 0 && response.status.lastFinishedAt <= 0) return null;
+
+  const settings = response.schedule.settings;
+  return {
+    results,
+    summary: {
+      ...response.status.summary,
+      usedPercentThreshold: settings.usedPercentThreshold,
+      sampled: settings.sampleSize > 0,
+      plannedActionPreview: results
+        .filter((item) => item.action !== 'keep')
+        .slice(0, 10)
+        .map((item) => `${formatAccountInspectionIdentity(item)} -> ${item.action}`),
+    },
+    startedAt,
+    finishedAt,
+  };
+};
+
 export const buildAccountInspectionBackendViewState = (
   response: AccountInspectionBackendResponse,
   now = Date.now()
@@ -561,34 +585,7 @@ export const buildAccountInspectionBackendViewState = (
       disable: response.status.summary.executedDisableCount ?? 0,
       enable: response.status.summary.executedEnableCount ?? 0,
     },
-    result: results.length > 0 || response.status.lastFinishedAt > 0
-      ? {
-          settings: {
-            baseUrl: '',
-            token: '',
-            targetType: settings.targetType,
-            workers: settings.workers,
-            deleteWorkers: settings.deleteWorkers,
-            timeout: settings.timeout,
-            retries: settings.retries,
-            usedPercentThreshold: settings.usedPercentThreshold,
-            sampleSize: settings.sampleSize,
-          },
-          files: [],
-          results,
-          summary: {
-            ...response.status.summary,
-            usedPercentThreshold: settings.usedPercentThreshold,
-            sampled: settings.sampleSize > 0,
-            plannedActionPreview: results
-              .filter((item) => item.action !== 'keep')
-              .slice(0, 10)
-              .map((item) => `${formatAccountInspectionIdentity(item)} -> ${item.action}`),
-          },
-          startedAt,
-          finishedAt,
-        }
-      : null,
+    result: buildAccountInspectionBackendRunResult(response, results, startedAt, finishedAt),
     progress: {
       total,
       completed,
@@ -656,16 +653,13 @@ export const applyAccountInspectionExecutionResult = (
     })
   );
 
-  const files = execution.refreshedFiles.length > 0 ? execution.refreshedFiles : previousResult.files;
   const summary = summarizeResults(nextResults);
 
   return {
     ...previousResult,
-    files,
     results: nextResults,
     summary: {
       ...previousResult.summary,
-      totalFiles: files.length || previousResult.summary.totalFiles,
       disabledCount: nextResults.filter((item) => item.disabled).length,
       enabledCount: nextResults.filter((item) => !item.disabled).length,
       ...summary,

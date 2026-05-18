@@ -91,28 +91,24 @@ func (s *Server) RegisterGinRoutes(group *gin.RouterGroup) {
 	group.PUT("/model-prices", s.handleModelPricesPut)
 }
 
-func parseQueryInt64(c *gin.Context, key string, fallback int64) int64 {
+func parseQueryBoundedInt64(c *gin.Context, key string, fallback int64, minValue int64) int64 {
 	value := strings.TrimSpace(c.Query(key))
 	if value == "" {
 		return fallback
 	}
 	parsed, err := strconv.ParseInt(value, 10, 64)
-	if err != nil || parsed < 0 {
+	if err != nil || parsed < minValue {
 		return fallback
 	}
 	return parsed
 }
 
+func parseQueryInt64(c *gin.Context, key string, fallback int64) int64 {
+	return parseQueryBoundedInt64(c, key, fallback, 0)
+}
+
 func parseQueryInt(c *gin.Context, key string, fallback int) int {
-	value := strings.TrimSpace(c.Query(key))
-	if value == "" {
-		return fallback
-	}
-	parsed, err := strconv.Atoi(value)
-	if err != nil || parsed <= 0 {
-		return fallback
-	}
-	return parsed
+	return int(parseQueryBoundedInt64(c, key, int64(fallback), 1))
 }
 func (s *Server) handleUsage(c *gin.Context) {
 	events, err := s.store.RecentEvents(c.Request.Context(), s.cfg.QueryLimit)

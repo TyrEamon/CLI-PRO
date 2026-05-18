@@ -58,6 +58,21 @@
   max-width: 760px;
 }
 
+.heroEyebrow {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--inspect-accent-soft);
+  color: var(--inspect-accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .heroTitle {
   font-size: 28px;
   font-weight: 700;
@@ -293,9 +308,139 @@
 }
 
 .summaryGrid,
-.summaryGridCompact {
+.summaryGridCompact,
+.riskGrid {
   display: grid;
   gap: 12px;
+}
+
+.assetOverviewLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.8fr);
+  gap: 16px;
+}
+
+.assetMetricGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.assetMetricCard {
+  min-height: 112px;
+}
+
+.assetMetricCard strong {
+  font-size: 26px;
+}
+
+.providerPanel {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--inspect-line);
+  border-radius: 12px;
+  background: var(--inspect-surface);
+}
+
+.providerPanelHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.providerPanelHeader strong {
+  font-size: 15px;
+}
+
+.providerPanelHeader span {
+  color: var(--inspect-muted);
+  font-size: 12px;
+}
+
+.providerList {
+  display: grid;
+  gap: 8px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.providerRow {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.2fr);
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--inspect-line) 70%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--inspect-surface-muted) 50%, transparent);
+}
+
+.providerNameCell {
+  display: grid;
+  gap: 4px;
+}
+
+.providerNameCell strong {
+  font-size: 14px;
+}
+
+.providerNameCell span {
+  color: var(--inspect-muted);
+  font-size: 12px;
+}
+
+.providerStatusGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
+  align-content: center;
+}
+
+.providerStatusGrid span {
+  color: var(--inspect-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.actionBreakdownGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.actionBreakdownCard {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--inspect-line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--inspect-surface-muted) 58%, var(--inspect-surface));
+}
+
+.actionBreakdownCard strong {
+  font-size: 14px;
+}
+
+.actionBreakdownCard div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.actionBreakdownCard span {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--inspect-surface);
+  color: var(--inspect-muted);
+  font-size: 12px;
+}
+
+.riskGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .summaryGrid {
@@ -339,6 +484,47 @@
 .summaryBad {
   border-color: color-mix(in srgb, var(--inspect-red) 30%, var(--inspect-line));
   background: color-mix(in srgb, var(--inspect-red) 7%, var(--inspect-surface));
+}
+
+.riskCard {
+  min-height: 112px;
+}
+
+.riskCard strong {
+  font-size: 24px;
+}
+
+.controlPanel {
+  border-color: color-mix(in srgb, var(--inspect-accent) 16%, var(--inspect-line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--inspect-accent) 3%, var(--inspect-surface)),
+      var(--inspect-surface)
+    );
+}
+
+.policyBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--inspect-accent) 18%, var(--inspect-line));
+  background: color-mix(in srgb, var(--inspect-accent) 7%, var(--inspect-surface-muted));
+}
+
+.policyBanner strong {
+  color: var(--inspect-ink);
+  font-size: 14px;
+}
+
+.policyBanner span {
+  color: var(--inspect-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: right;
 }
 
 .panel {
@@ -839,6 +1025,153 @@
   color: var(--inspect-green);
 }
 
+.resultCards {
+  display: none;
+}
+
+.resultCard {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--inspect-line);
+  border-radius: 12px;
+  background: var(--inspect-surface);
+}
+
+.resultCardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.resultCardGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--inspect-surface-muted);
+}
+
+.resultCardGrid span {
+  color: var(--inspect-muted);
+  font-size: 12px;
+}
+
+.resultCardGrid strong {
+  font-size: 12px;
+  text-align: right;
+}
+
+.resultCard p {
+  margin: 0;
+  color: var(--inspect-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.emptyState {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  min-height: 220px;
+  padding: 28px;
+  border: 1px dashed color-mix(in srgb, var(--inspect-line-strong) 72%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--inspect-surface-muted) 68%, transparent);
+  text-align: center;
+}
+
+.emptyState strong {
+  max-width: 620px;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.emptyState span {
+  max-width: 560px;
+  color: var(--inspect-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.confirmationBody {
+  display: grid;
+  gap: 14px;
+}
+
+.confirmationBody p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.confirmationStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.confirmationStats span {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--inspect-surface-muted);
+  color: var(--inspect-ink);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.confirmationDangerStat {
+  background: color-mix(in srgb, var(--inspect-red) 12%, var(--inspect-surface)) !important;
+  color: var(--inspect-red) !important;
+}
+
+.confirmationPreview {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--inspect-line);
+  border-radius: 12px;
+  background: var(--inspect-surface-muted);
+}
+
+.confirmationPreview > strong {
+  font-size: 13px;
+}
+
+.confirmationPreviewRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(76px, 0.5fr) minmax(76px, 0.5fr) minmax(0, 1.6fr);
+  gap: 8px;
+  align-items: start;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.confirmationPreviewRow span,
+.confirmationPreviewRow em {
+  overflow-wrap: anywhere;
+}
+
+.confirmationPreviewRow small {
+  color: var(--inspect-muted);
+}
+
+.confirmationPreviewRow em {
+  color: var(--inspect-muted);
+  font-style: normal;
+}
+
+.warningText {
+  color: var(--inspect-amber);
+}
+
+.dangerText {
+  color: var(--inspect-red);
+  font-weight: 700;
+}
+
 .errorText {
   color: var(--inspect-red);
   word-break: break-word;
@@ -861,8 +1194,11 @@
 }
 
 @media (max-width: 1280px) {
-  .summaryGrid,
-  .summaryGridCompact {
+  .assetOverviewLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .assetMetricGrid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
@@ -889,8 +1225,20 @@
   }
 
   .summaryGrid,
-  .summaryGridCompact {
+  .summaryGridCompact,
+  .riskGrid,
+  .assetMetricGrid,
+  .actionBreakdownGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .policyBanner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .policyBanner span {
+    text-align: left;
   }
 
   .logRow {
@@ -913,7 +1261,12 @@
   }
 
   .summaryGrid,
-  .summaryGridCompact {
+  .summaryGridCompact,
+  .riskGrid,
+  .assetMetricGrid,
+  .actionBreakdownGrid,
+  .providerRow,
+  .providerStatusGrid {
     grid-template-columns: 1fr;
   }
 
@@ -924,6 +1277,33 @@
   .progressActions :global(.btn),
   .heroActions :global(.btn) {
     flex: 1 1 140px;
+  }
+
+  .tableWrap {
+    display: none;
+  }
+
+  .resultCards {
+    display: grid;
+    gap: 12px;
+  }
+
+  .resultCard .operationActions {
+    flex-wrap: wrap;
+  }
+
+  .confirmationStats,
+  .confirmationPreviewRow {
+    grid-template-columns: 1fr;
+  }
+
+  .confirmationStats span,
+  .confirmationPreviewRow strong {
+    text-align: left;
+  }
+
+  .emptyState {
+    padding: 22px 16px;
   }
 
   .settingsField,

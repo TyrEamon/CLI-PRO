@@ -16,7 +16,13 @@ import {
 } from '@/components/ui/icons';
 import {
   buildAccountRows,
+  buildDayLabel,
+  buildHourLabel,
+  buildLocalDayKey,
   buildMonitoringSummary,
+  formatShortDateTime,
+  getRangeStartMs,
+  joinUnique,
   useMonitoringData,
   type MonitoringAccountRow,
   type MonitoringEventRow,
@@ -373,7 +379,7 @@ const RankingMetricSwitch = ({
 
 const buildAccountCardFileName = (row: MonitoringAccountRow, quotaEntries: AccountQuotaEntry[] = []) => {
   const quotaFileNames = Array.from(new Set(quotaEntries.map((entry) => entry.fileName).filter(Boolean)));
-  if (quotaFileNames.length > 0) return joinShort(quotaFileNames, 1);
+  if (quotaFileNames.length > 0) return joinUnique(quotaFileNames, 1);
 
   const fileName = row.authLabels.find((label) => label && label !== '-' && label.endsWith('.json'));
   return fileName || row.authLabels.find((label) => label && label !== '-') || row.accountMasked || row.account;
@@ -381,7 +387,7 @@ const buildAccountCardFileName = (row: MonitoringAccountRow, quotaEntries: Accou
 
 const buildAccountCardProviderText = (row: MonitoringAccountRow) => {
   const providers = row.providers.filter((provider) => provider && provider !== '-');
-  return providers.length > 0 ? joinShort(providers, 2) : '-';
+  return providers.length > 0 ? joinUnique(providers, 2) : '-';
 };
 
 const sortAccountOverviewCardMetrics = (metrics: AccountSummaryMetric[], t: TFunction) => {
@@ -495,28 +501,6 @@ type AccountSummaryMetric = {
 
 const formatPercent = (value: number) => `${(value * 100).toFixed(1)}%`;
 
-const getRangeStartMs = (range: MonitoringTimeRange, nowMs: number) => {
-  const start = new Date(nowMs);
-  start.setHours(0, 0, 0, 0);
-
-  switch (range) {
-    case 'today':
-      return start.getTime();
-    case '7d':
-      start.setDate(start.getDate() - 6);
-      return start.getTime();
-    case '14d':
-      start.setDate(start.getDate() - 13);
-      return start.getTime();
-    case '30d':
-      start.setDate(start.getDate() - 29);
-      return start.getTime();
-    case 'all':
-    default:
-      return Number.NEGATIVE_INFINITY;
-  }
-};
-
 const filterRowsByRange = (rows: MonitoringEventRow[], range: MonitoringTimeRange) => {
   const nowMs = Date.now();
   const startMs = getRangeStartMs(range, nowMs);
@@ -544,26 +528,11 @@ const getChartAxisLabels = <T extends { key: string; label: string }>(points: T[
   return labels;
 };
 
-const formatLocalDayKey = (date: Date) => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
-const formatHourLabel = (date: Date) => `${String(date.getHours()).padStart(2, '0')}:00`;
-
-const formatDayLabel = (date: Date) => `${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`;
-
-const formatShortDateTime = (date: Date) =>
-  `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-
 const buildUsageTrendRangeLabel = (range: MonitoringTimeRange, t: TFunction) => {
   if (range === 'all') return t('monitoring.all_retained_logs');
 
-  const now = new Date();
-  const start = new Date(getRangeStartMs(range, now.getTime()));
-  return `${formatShortDateTime(start)} - ${formatShortDateTime(now)}`;
+  const nowMs = Date.now();
+  return `${formatShortDateTime(getRangeStartMs(range, nowMs))} - ${formatShortDateTime(nowMs)}`;
 };
 
 const getEmptyTrendPoint = (key: string, label: string): TrendPoint => ({
@@ -586,8 +555,8 @@ const buildFilledTrendBuckets = (range: MonitoringTimeRange, nowMs: number) => {
     const now = new Date(nowMs);
     cursor.setMinutes(0, 0, 0);
     while (cursor.getTime() <= now.getTime()) {
-      const dayKey = formatLocalDayKey(cursor);
-      const label = formatHourLabel(cursor);
+      const dayKey = buildLocalDayKey(cursor.getTime());
+      const label = buildHourLabel(cursor.getTime());
       buckets.push(getEmptyTrendPoint(`${dayKey} ${label}`, label));
       cursor.setHours(cursor.getHours() + 1);
     }
@@ -598,8 +567,8 @@ const buildFilledTrendBuckets = (range: MonitoringTimeRange, nowMs: number) => {
   const end = new Date(nowMs);
   end.setHours(0, 0, 0, 0);
   while (cursor.getTime() <= end.getTime()) {
-    const key = formatLocalDayKey(cursor);
-    buckets.push(getEmptyTrendPoint(key, formatDayLabel(cursor)));
+    const key = buildLocalDayKey(cursor.getTime());
+    buckets.push(getEmptyTrendPoint(key, buildDayLabel(key)));
     cursor.setDate(cursor.getDate() + 1);
   }
   return buckets;
@@ -610,7 +579,7 @@ const buildTimeBucketMeta = (range: MonitoringTimeRange) => {
   return {
     useHourly,
     getKey: (row: MonitoringEventRow) => (useHourly ? `${row.dayKey} ${row.hourLabel}` : row.dayKey),
-    getLabel: (row: MonitoringEventRow) => (useHourly ? row.hourLabel : row.dayKey.slice(5).replace('-', '/')),
+    getLabel: (row: MonitoringEventRow) => (useHourly ? row.hourLabel : buildDayLabel(row.dayKey)),
   };
 };
 
@@ -622,13 +591,6 @@ const formatDeltaPercent = (current: number, previous: number) => {
   if (roundedPrevious <= 0) return roundedCurrent > 0 ? '+100.0%' : '0.0%';
   const delta = (roundedCurrent - roundedPrevious) / roundedPrevious;
   return `${delta >= 0 ? '+' : ''}${(delta * 100).toFixed(1)}%`;
-};
-
-const joinShort = (values: string[], limit = 2) => {
-  if (values.length <= limit) {
-    return values.join(', ');
-  }
-  return `${values.slice(0, limit).join(', ')} +${values.length - limit}`;
 };
 
 const createPriceDraft = (price?: ModelPrice): PriceDraft => ({
@@ -2139,7 +2101,7 @@ function AccountStatsPanel({
   const visibleRows = filteredRows.slice(safePageIndex * itemsPerPage, (safePageIndex + 1) * itemsPerPage);
 
   const accountStatusRange = useMemo(
-    () => buildAccountStatusRange(rows.flatMap((row) => row.rows), range),
+    () => buildAccountStatusRange(rows.flatMap((row) => row.rows ?? []), range),
     [rows, range]
   );
 
@@ -2240,7 +2202,7 @@ function AccountStatsPanel({
           <>
             <div ref={gridRef} className={styles.accountOverviewCardGrid}>
               {visibleRows.map((row) => {
-                const statusData = buildAccountStatusData(row.rows, accountStatusRange);
+                const statusData = buildAccountStatusData(row.rows ?? [], accountStatusRange);
                 return (
                   <AccountOverviewCard
                     key={row.id}
@@ -2642,7 +2604,7 @@ export function MonitoringCenterPage() {
     [topStatsRows, timeRange]
   );
   const accountStatsRows = useMemo(
-    () => [...buildAccountRows(accountStatsFilteredRows, 'account')]
+    () => [...buildAccountRows(accountStatsFilteredRows, 'account', { includeRows: true })]
       .sort((left, right) => (
         getAccountSortValue(right, accountStatsMetric) - getAccountSortValue(left, accountStatsMetric)
         || right.lastSeenAt - left.lastSeenAt
