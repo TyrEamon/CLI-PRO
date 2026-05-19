@@ -2203,14 +2203,11 @@ func (s *accountInspectionScheduler) applyAutomaticActions(ctx context.Context, 
 }
 
 func autoActionForResult(result accountInspectionResult, settings accountInspectionSettings) accountInspectionAction {
-	if result.DeepProbeStatus == string(accountInspectionDeepProbeTransientError) {
-		return ""
-	}
 	status := 0
 	if result.StatusCode != nil {
 		status = *result.StatusCode
 	}
-	accountError := isAccountErrorStatus(status) || (!result.IsQuota && status >= 400)
+	accountError := !result.IsQuota && (result.Error != "" || isAccountErrorStatus(status) || status >= 400)
 	if accountError {
 		if settings.AutoExecuteAccountErrorAction == accountInspectionActionDelete {
 			return accountInspectionActionDelete
