@@ -1225,6 +1225,7 @@ func (s *accountInspectionScheduler) inspectAccount(ctx context.Context, account
 		result.NextRefreshAt = account.nextRefreshAtMillis()
 		result.Error = refreshErr.Error()
 		result.ActionReason = "刷新令牌失败，保留账号"
+		s.syncInspectionAuthError(ctx, account, "inspection_probe_error", refreshErr.Error(), 0)
 		s.appendLog("warning", fmt.Sprintf("%s 刷新令牌失败，保留账号：%s", account.identity(), refreshErr.Error()))
 		return result
 	} else if refreshTriggered {
@@ -1262,10 +1263,12 @@ func (s *accountInspectionScheduler) inspectAccount(ctx context.Context, account
 		result.StatusCode = statusCode
 		result.Error = err.Error()
 		result.ActionReason = "探测异常，保留账号"
-		s.appendLog("warning", fmt.Sprintf("%s 探测异常，保留账号：%s", account.identity(), err.Error()))
 		if statusCode != nil && isAccountErrorStatus(*statusCode) {
 			s.syncInspectionAuthStatus(ctx, account, *statusCode)
+		} else {
+			s.syncInspectionAuthError(ctx, account, "inspection_probe_error", err.Error(), 0)
 		}
+		s.appendLog("warning", fmt.Sprintf("%s 探测异常，保留账号：%s", account.identity(), err.Error()))
 		return result
 	}
 	result.StatusCode = statusCode
@@ -1687,7 +1690,7 @@ func isInspectionAuthRecoveryStatus(status int) bool {
 	return (status >= 200 && status < 300) || status == 402 || status == 429
 }
 
-func (s *accountInspectionScheduler) syncInspectionAuthStatus(ctx context.Context, account accountInspectionAccount, status int) {
+func (s *accountInspectionScheduler) syncInspectionAuthError(ctx context.Context, account accountInspectionAccount, code string, message string, status int) {
 	if s == nil || s.h == nil || s.h.authManager == nil || account.AuthIndex == "" {
 		return
 	}
@@ -1696,37 +1699,52 @@ func (s *accountInspectionScheduler) syncInspectionAuthStatus(ctx context.Contex
 		return
 	}
 	now := time.Now()
+	if auth.Status == coreauth.StatusError && auth.StatusMessage == message && auth.Unavailable && auth.LastError != nil && auth.LastError.Code == code && auth.LastError.HTTPStatus == status {
+		return
+	}
+	auth.Status = coreauth.StatusError
+	auth.StatusMessage = message
+	auth.Unavailable = true
+	auth.LastError = &coreauth.Error{Code: code, Message: message, HTTPStatus: status}
+	auth.UpdatedAt = now
+	if _, err := s.h.authManager.Update(ctx, auth); err != nil {
+		s.appendLog("warning", fmt.Sprintf("%s 认证状态回写失败：%s", account.identity(), err.Error()))
+	}
+}
+
+func (s *accountInspectionScheduler) clearInspectionAuthError(ctx context.Context, account accountInspectionAccount) {
+	if s == nil || s.h == nil || s.h.authManager == nil || account.AuthIndex == "" {
+		return
+	}
+	auth := s.h.authByIndex(account.AuthIndex)
+	if auth == nil || auth.Status != coreauth.StatusError || auth.LastError == nil {
+		return
+	}
+	if auth.LastError.Code != "inspection_http_error" && auth.LastError.Code != "inspection_probe_error" {
+		return
+	}
+	if auth.Disabled {
+		auth.Status = coreauth.StatusDisabled
+	} else {
+		auth.Status = coreauth.StatusActive
+	}
+	auth.StatusMessage = ""
+	auth.Unavailable = false
+	auth.LastError = nil
+	auth.UpdatedAt = time.Now()
+	if _, err := s.h.authManager.Update(ctx, auth); err != nil {
+		s.appendLog("warning", fmt.Sprintf("%s 认证状态清理失败：%s", account.identity(), err.Error()))
+	}
+}
+
+func (s *accountInspectionScheduler) syncInspectionAuthStatus(ctx context.Context, account accountInspectionAccount, status int) {
 	if isAccountErrorStatus(status) {
 		message := fmt.Sprintf("HTTP %d", status)
-		if auth.Status == coreauth.StatusError && auth.StatusMessage == message && auth.Unavailable && auth.LastError != nil && auth.LastError.HTTPStatus == status {
-			return
-		}
-		auth.Status = coreauth.StatusError
-		auth.StatusMessage = message
-		auth.Unavailable = true
-		auth.LastError = &coreauth.Error{Code: "inspection_http_error", Message: fmt.Sprintf("account inspection returned HTTP %d", status), HTTPStatus: status}
-		auth.UpdatedAt = now
-		if _, err := s.h.authManager.Update(ctx, auth); err != nil {
-			s.appendLog("warning", fmt.Sprintf("%s 认证状态回写失败：%s", account.identity(), err.Error()))
-		}
+		s.syncInspectionAuthError(ctx, account, "inspection_http_error", message, status)
 		return
 	}
-	if !isInspectionAuthRecoveryStatus(status) {
-		return
-	}
-	if auth.Status == coreauth.StatusError && auth.LastError != nil && auth.LastError.Code == "inspection_http_error" {
-		if auth.Disabled {
-			auth.Status = coreauth.StatusDisabled
-		} else {
-			auth.Status = coreauth.StatusActive
-		}
-		auth.StatusMessage = ""
-		auth.Unavailable = false
-		auth.LastError = nil
-		auth.UpdatedAt = now
-		if _, err := s.h.authManager.Update(ctx, auth); err != nil {
-			s.appendLog("warning", fmt.Sprintf("%s 认证状态清理失败：%s", account.identity(), err.Error()))
-		}
+	if isInspectionAuthRecoveryStatus(status) {
+		s.clearInspectionAuthError(ctx, account)
 	}
 }
 

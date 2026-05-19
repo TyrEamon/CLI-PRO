@@ -404,14 +404,14 @@ const isAuthFileAbnormal = (file: AuthFileItem) => {
   return readAuthFileStatusMessage(file).length > 0;
 };
 
-const incrementProviderStats = (stats: ProviderAccountStats, disabled: boolean, quotaLow: boolean, abnormal: boolean) => {
+const incrementProviderStats = (stats: ProviderAccountStats, disabled: boolean, highAvailable: boolean, quotaLow: boolean, abnormal: boolean) => {
   stats.total += 1;
   if (disabled) {
     stats.disabled += 1;
   } else {
     stats.enabled += 1;
   }
-  if (!disabled && !quotaLow && !abnormal) stats.highAvailable += 1;
+  if (highAvailable) stats.highAvailable += 1;
   if (quotaLow) stats.quotaLow += 1;
   if (abnormal) stats.abnormal += 1;
 };
@@ -448,22 +448,23 @@ const buildAuthFileAccountStats = (
   files.forEach((file) => {
     const provider = resolveAuthProvider(file) || 'unknown';
     const disabled = isDisabledAuthFile(file);
-    const abnormal = isAuthFileAbnormal(file);
     const quotaLow = quotaMaps.some((providerQuota) =>
       isQuotaLowState(providerQuota[file.name], usedPercentThreshold)
     );
+    const abnormal = isAuthFileAbnormal(file);
+    const highAvailable = !disabled && !quotaLow && !abnormal;
 
     if (disabled) {
       stats.disabled += 1;
     } else {
       stats.enabled += 1;
     }
-    if (!disabled && !quotaLow && !abnormal) stats.highAvailable += 1;
+    if (highAvailable) stats.highAvailable += 1;
     if (abnormal) stats.abnormal += 1;
     if (quotaLow) stats.quotaLow += 1;
 
     const providerEntry = providerStats.get(provider) ?? emptyProviderAccountStats(provider);
-    incrementProviderStats(providerEntry, disabled, quotaLow, abnormal);
+    incrementProviderStats(providerEntry, disabled, highAvailable, quotaLow, abnormal);
     providerStats.set(provider, providerEntry);
   });
 
@@ -1125,8 +1126,11 @@ export function AccountInspectionPage() {
       refreshedBackendFinishedAtRef.current !== response.status.lastFinishedAt
     ) {
       refreshedBackendFinishedAtRef.current = response.status.lastFinishedAt;
-      quotaPersistenceMiddleware.markStale(response.status.lastFinishedAt);
-      void loadAuthFiles();
+      quotaPersistenceMiddleware.markStale();
+      void Promise.all([
+        loadAuthFiles(),
+        quotaPersistenceMiddleware.ensureFresh(),
+      ]);
     }
   }, [loadAuthFiles]);
 
@@ -2092,15 +2096,17 @@ export function AccountInspectionPage() {
                     <span>{`${t('monitoring.account_inspection_action_delete')}: ${actionStats.manualDelete}`}</span>
                     <span>{`${t('monitoring.account_inspection_action_disable')}: ${actionStats.manualDisable}`}</span>
                     <span>{`${t('monitoring.account_inspection_action_enable')}: ${actionStats.manualEnable}`}</span>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      onClick={handleExecutePlanned}
-                      loading={executing}
-                      disabled={!result || runStatus === 'running' || executing || pendingActionCount === 0}
-                    >
-                      {executing ? t('monitoring.account_inspection_executing') : t('monitoring.account_inspection_execute_now')}
-                    </Button>
+                    <div className={styles.manualPendingActions}>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={handleExecutePlanned}
+                        loading={executing}
+                        disabled={!result || runStatus === 'running' || executing || pendingActionCount === 0}
+                      >
+                        {executing ? t('monitoring.account_inspection_executing') : t('monitoring.account_inspection_execute_now')}
+                      </Button>
+                    </div>
                   </div>
                 ) : (
                   <div className={styles.manualPendingEmpty}>
