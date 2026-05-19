@@ -2440,291 +2440,297 @@ export function AccountInspectionPage() {
         open={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
         title={t('monitoring.account_inspection_settings_title')}
-        width={960}
+        width={1120}
         className={styles.settingsModal}
       >
-        <div className={styles.settingsIntro}>
-          <span>{t('monitoring.account_inspection_settings_desc')}</span>
-          <div className={styles.settingsSummaryGrid}>
-            <span>
-              <small>{t('monitoring.account_inspection_detection_scope', { defaultValue: 'Detection Scope' })}</small>
-              <strong>{draftInspectionScopeLabel}</strong>
-            </span>
-            <span>
-              <small>{t('monitoring.account_inspection_quota_threshold_short', { defaultValue: 'Quota Threshold' })}</small>
-              <strong>{`${settingsDraft.usedPercentThreshold || '--'}%`}</strong>
-            </span>
-            <span>
-              <small>{t('monitoring.account_inspection_scheduled_inspection_short', { defaultValue: 'Scheduled Inspection' })}</small>
-              <strong>{draftScheduleStatusLabel}</strong>
-            </span>
-            <span>
-              <small>{t('monitoring.account_inspection_settings_auto_section_title')}</small>
-              <strong>{draftAutoPolicyLabel}</strong>
-            </span>
+        <div className={styles.settingsWorkbench}>
+          <aside className={styles.settingsSidebar}>
+            <div className={styles.settingsSidebarIntro}>
+              <strong>{t('monitoring.account_inspection_settings_title')}</strong>
+              <span>{t('monitoring.account_inspection_settings_desc')}</span>
+            </div>
+            <div className={styles.settingsSidebarNav}>
+              {[
+                ['account-inspection-settings-plan', t('monitoring.account_inspection_schedule_section_title'), draftScheduleStatusLabel],
+                ['account-inspection-settings-scope', t('monitoring.account_inspection_settings_basic_section_title'), draftInspectionScopeLabel],
+                ['account-inspection-settings-runtime', t('monitoring.account_inspection_settings_runtime_section_title', { defaultValue: 'Concurrency & Timeout' }), `${settingsDraft.workers} / ${settingsDraft.timeout}ms`],
+                ['account-inspection-settings-antigravity', t('monitoring.account_inspection_settings_advanced_section_title', { defaultValue: 'Advanced Detection' }), draftQuotaModeLabel],
+                ['account-inspection-settings-auto', t('monitoring.account_inspection_settings_auto_section_title'), draftAutoPolicyLabel],
+              ].map(([target, label, meta]) => (
+                <button
+                  key={target}
+                  type="button"
+                  onClick={() => document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                >
+                  <strong>{label}</strong>
+                  <span>{meta}</span>
+                </button>
+              ))}
+            </div>
+            <div className={styles.settingsSidebarStatus}>
+              <span>
+                <small>{t('monitoring.account_inspection_quota_threshold_short', { defaultValue: 'Quota Threshold' })}</small>
+                <strong>{`${settingsDraft.usedPercentThreshold || '--'}%`}</strong>
+              </span>
+              <span>
+                <small>{t('monitoring.account_inspection_account_error_action_short', { defaultValue: 'Account Error Action' })}</small>
+                <strong>{draftAccountErrorActionLabel}</strong>
+              </span>
+            </div>
+          </aside>
+
+          <div className={styles.settingsWorkbenchMain}>
+            <section className={styles.settingsHeroPanel}>
+              <div>
+                <strong>{t('monitoring.account_inspection_settings_overview_title', { defaultValue: 'Inspection Configuration Overview' })}</strong>
+                <span>{t('monitoring.account_inspection_settings_overview_desc', { defaultValue: 'Review how the next inspection will run before saving changes.' })}</span>
+              </div>
+              <div className={styles.settingsSummaryGrid}>
+                <span>
+                  <small>{t('monitoring.account_inspection_detection_scope', { defaultValue: 'Detection Scope' })}</small>
+                  <strong>{draftInspectionScopeLabel}</strong>
+                </span>
+                <span>
+                  <small>{t('monitoring.account_inspection_scheduled_inspection_short', { defaultValue: 'Scheduled Inspection' })}</small>
+                  <strong>{draftScheduleStatusLabel}</strong>
+                </span>
+                <span>
+                  <small>{t('monitoring.account_inspection_settings_antigravity_quota_mode_label', { defaultValue: 'Antigravity Quota Judgment' })}</small>
+                  <strong>{draftQuotaModeLabel}</strong>
+                </span>
+                <span>
+                  <small>{t('monitoring.account_inspection_settings_auto_section_title')}</small>
+                  <strong>{draftAutoPolicyLabel}</strong>
+                </span>
+              </div>
+            </section>
+
+            <section id="account-inspection-settings-plan" className={styles.settingsWorkbenchSection}>
+              <div className={styles.settingsWorkbenchHeader}>
+                <div>
+                  <small>01</small>
+                  <strong>{t('monitoring.account_inspection_schedule_section_title')}</strong>
+                  <span>{t('monitoring.account_inspection_schedule_section_desc')}</span>
+                </div>
+                <ToggleSwitch
+                  checked={scheduleDraft.enabled}
+                  onChange={(value) => dispatchBackendState({ type: 'updateScheduleDraft', values: { enabled: value } })}
+                  ariaLabel={t('monitoring.account_inspection_schedule_enabled_label')}
+                />
+              </div>
+              <div className={styles.settingsSplitGrid}>
+                <div className={styles.settingsFormPanel}>
+                  <Input
+                    label={t('monitoring.account_inspection_schedule_interval_label')}
+                    type="number"
+                    value={scheduleDraft.intervalMinutes}
+                    onChange={(event) => dispatchBackendState({ type: 'updateScheduleDraft', values: { intervalMinutes: event.target.value } })}
+                    min={SCHEDULE_INTERVAL_LIMITS.min}
+                    step={1}
+                  />
+                  <div className={styles.settingsHint}>{t('monitoring.account_inspection_schedule_interval_hint')}</div>
+                </div>
+                <div className={styles.settingsInsightPanel}>
+                  <small>{t('monitoring.account_inspection_schedule_next_run')}</small>
+                  <strong>{schedule?.nextRunAt ? formatTimestamp(schedule.nextRunAt, i18n.language) : '--'}</strong>
+                  <span>{scheduleDraft.enabled ? draftScheduleStatusLabel : settingDisabledLabel}</span>
+                </div>
+              </div>
+            </section>
+
+            <section id="account-inspection-settings-scope" className={styles.settingsWorkbenchSection}>
+              <div className={styles.settingsWorkbenchHeader}>
+                <div>
+                  <small>02</small>
+                  <strong>{t('monitoring.account_inspection_settings_basic_section_title')}</strong>
+                  <span>{t('monitoring.account_inspection_settings_basic_section_desc')}</span>
+                </div>
+              </div>
+              <div className={styles.settingsThreeGrid}>
+                <div className={styles.settingsFormPanel}>
+                  <label className={styles.settingsLabel}>{t('monitoring.account_inspection_settings_target_type_label')}</label>
+                  <Select
+                    value={settingsDraft.targetType}
+                    options={INSPECTION_TARGET_OPTIONS}
+                    onChange={(value) => handleSettingsDraftChange('targetType', value)}
+                    ariaLabel={t('monitoring.account_inspection_settings_target_type_label')}
+                  />
+                  <div className={styles.settingsHint}>{t('monitoring.account_inspection_settings_target_type_hint')}</div>
+                </div>
+                <div className={styles.settingsFormPanel}>
+                  <Input
+                    label={t('monitoring.account_inspection_settings_used_percent_threshold_label')}
+                    hint={t('monitoring.account_inspection_settings_threshold_hint')}
+                    type="number"
+                    value={settingsDraft.usedPercentThreshold}
+                    onChange={(event) => handleSettingsDraftChange('usedPercentThreshold', event.target.value)}
+                    min={THRESHOLD_LIMITS.min}
+                    max={THRESHOLD_LIMITS.max}
+                    step={0.1}
+                  />
+                </div>
+                <div className={styles.settingsFormPanel}>
+                  <Input
+                    label={t('monitoring.account_inspection_settings_sample_size_label')}
+                    hint={t('monitoring.account_inspection_settings_sample_size_hint')}
+                    type="number"
+                    value={settingsDraft.sampleSize}
+                    onChange={(event) => handleSettingsDraftChange('sampleSize', event.target.value)}
+                    min={SAMPLE_SIZE_LIMITS.min}
+                    step={1}
+                  />
+                </div>
+              </div>
+            </section>
+
+            <section id="account-inspection-settings-runtime" className={styles.settingsWorkbenchSection}>
+              <div className={styles.settingsWorkbenchHeader}>
+                <div>
+                  <small>03</small>
+                  <strong>{t('monitoring.account_inspection_settings_runtime_section_title', { defaultValue: 'Concurrency & Timeout' })}</strong>
+                  <span>{t('monitoring.account_inspection_settings_runtime_section_desc', { defaultValue: 'Control inspection throughput, deletion concurrency, timeout and retry behavior.' })}</span>
+                </div>
+              </div>
+              <div className={styles.settingsMatrixGrid}>
+                <Input
+                  label={t('monitoring.account_inspection_settings_workers_label')}
+                  hint={t('monitoring.account_inspection_settings_workers_hint', { min: WORKER_LIMITS.min, max: WORKER_LIMITS.max })}
+                  type="number"
+                  value={settingsDraft.workers}
+                  onChange={(event) => handleSettingsDraftChange('workers', event.target.value)}
+                  min={WORKER_LIMITS.min}
+                  max={WORKER_LIMITS.max}
+                  step={1}
+                />
+                <Input
+                  label={t('monitoring.account_inspection_settings_delete_workers_label')}
+                  hint={t('monitoring.account_inspection_settings_delete_workers_hint', { min: DELETE_WORKER_LIMITS.min, max: DELETE_WORKER_LIMITS.max })}
+                  type="number"
+                  value={settingsDraft.deleteWorkers}
+                  onChange={(event) => handleSettingsDraftChange('deleteWorkers', event.target.value)}
+                  min={DELETE_WORKER_LIMITS.min}
+                  max={DELETE_WORKER_LIMITS.max}
+                  step={1}
+                />
+                <Input
+                  label={t('monitoring.account_inspection_settings_timeout_label')}
+                  hint={t('monitoring.account_inspection_settings_timeout_hint', { min: TIMEOUT_LIMITS.min, max: TIMEOUT_LIMITS.max })}
+                  type="number"
+                  value={settingsDraft.timeout}
+                  onChange={(event) => handleSettingsDraftChange('timeout', event.target.value)}
+                  min={TIMEOUT_LIMITS.min}
+                  max={TIMEOUT_LIMITS.max}
+                  step={TIMEOUT_LIMITS.step}
+                />
+                <Input
+                  label={t('monitoring.account_inspection_settings_retries_label')}
+                  hint={t('monitoring.account_inspection_settings_retries_hint', { min: RETRY_LIMITS.min, max: RETRY_LIMITS.max })}
+                  type="number"
+                  value={settingsDraft.retries}
+                  onChange={(event) => handleSettingsDraftChange('retries', event.target.value)}
+                  min={RETRY_LIMITS.min}
+                  max={RETRY_LIMITS.max}
+                  step={1}
+                />
+              </div>
+            </section>
+
+            <section id="account-inspection-settings-antigravity" className={styles.settingsWorkbenchSection}>
+              <div className={styles.settingsWorkbenchHeader}>
+                <div>
+                  <small>04</small>
+                  <strong>{t('monitoring.account_inspection_settings_advanced_section_title', { defaultValue: 'Advanced Detection' })}</strong>
+                  <span>{t('monitoring.account_inspection_settings_advanced_section_desc', { defaultValue: 'Enable stricter availability checks for specific providers.' })}</span>
+                </div>
+              </div>
+              <div className={styles.settingsFocusGrid}>
+                <div className={styles.settingsFocusCard}>
+                  <label className={styles.settingsLabel}>{t('monitoring.account_inspection_settings_antigravity_quota_mode_label', { defaultValue: 'Antigravity Quota Judgment' })}</label>
+                  <Select
+                    value={settingsDraft.antigravityQuotaMode}
+                    options={ANTIGRAVITY_QUOTA_MODE_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))}
+                    onChange={handleAntigravityQuotaModeChange}
+                    ariaLabel={t('monitoring.account_inspection_settings_antigravity_quota_mode_label', { defaultValue: 'Antigravity Quota Judgment' })}
+                  />
+                  <span>{t('monitoring.account_inspection_settings_antigravity_quota_mode_hint', { defaultValue: 'Controls how Antigravity quota groups are judged in account inspection and asset overview.' })}</span>
+                  <strong>{draftQuotaModeLabel}</strong>
+                </div>
+                <div className={styles.settingsFocusCard}>
+                  <div className={styles.settingsPolicyControl}>
+                    <ToggleSwitch
+                      checked={settingsDraft.antigravityDeepProbeEnabled}
+                      onChange={handleAntigravityDeepProbeChange}
+                      label={t('monitoring.account_inspection_settings_antigravity_deep_probe_label', { defaultValue: 'Antigravity Deep Probe' })}
+                      ariaLabel={t('monitoring.account_inspection_settings_antigravity_deep_probe_label', { defaultValue: 'Antigravity Deep Probe' })}
+                      labelPosition="left"
+                    />
+                  </div>
+                  <span>{t('monitoring.account_inspection_settings_antigravity_deep_probe_hint', { defaultValue: 'When Antigravity quota appears available, send one minimal real request to verify account availability. This adds a small request cost and inspection time.' })}</span>
+                  <div className={!settingsDraft.antigravityDeepProbeEnabled ? styles.settingsMutedField : undefined}>
+                    <Input
+                      label={t('monitoring.account_inspection_settings_antigravity_deep_probe_model_label', { defaultValue: 'Deep Probe Model' })}
+                      hint={t('monitoring.account_inspection_settings_antigravity_deep_probe_model_hint', { defaultValue: 'Model used for Antigravity generateContent deep probe.' })}
+                      value={settingsDraft.antigravityDeepProbeModel}
+                      onChange={(event) => handleSettingsDraftChange('antigravityDeepProbeModel', event.target.value)}
+                      disabled={!settingsDraft.antigravityDeepProbeEnabled}
+                    />
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section id="account-inspection-settings-auto" className={styles.settingsWorkbenchSection}>
+              <div className={styles.settingsWorkbenchHeader}>
+                <div>
+                  <small>05</small>
+                  <strong>{t('monitoring.account_inspection_settings_auto_section_title')}</strong>
+                  <span>{t('monitoring.account_inspection_settings_auto_section_desc')}</span>
+                </div>
+              </div>
+              <div className={styles.settingsAutomationGrid}>
+                <div className={styles.settingsAutomationStack}>
+                  <div className={styles.settingsAutomationCard}>
+                    <ToggleSwitch
+                      checked={settingsDraft.autoExecuteQuotaLimitDisable}
+                      onChange={handleAutoExecuteQuotaLimitChange}
+                      label={t('monitoring.account_inspection_settings_auto_execute_quota_limit_disable_label')}
+                      ariaLabel={t('monitoring.account_inspection_settings_auto_execute_quota_limit_disable_label')}
+                      labelPosition="left"
+                    />
+                    <span>{t('monitoring.account_inspection_settings_auto_execute_quota_limit_disable_hint')}</span>
+                  </div>
+                  <div className={styles.settingsAutomationCard}>
+                    <ToggleSwitch
+                      checked={settingsDraft.autoExecuteQuotaRecoveryEnable}
+                      onChange={handleAutoExecuteQuotaRecoveryChange}
+                      label={t('monitoring.account_inspection_settings_auto_execute_quota_recovery_enable_label')}
+                      ariaLabel={t('monitoring.account_inspection_settings_auto_execute_quota_recovery_enable_label')}
+                      labelPosition="left"
+                    />
+                    <span>{t('monitoring.account_inspection_settings_auto_execute_quota_recovery_enable_hint')}</span>
+                  </div>
+                </div>
+                <div className={styles.settingsRiskPanel}>
+                  <label className={styles.settingsLabel}>{t('monitoring.account_inspection_settings_auto_execute_account_error_action_label')}</label>
+                  <Select
+                    value={settingsDraft.autoExecuteAccountErrorAction}
+                    options={AUTO_ERROR_ACTION_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))}
+                    onChange={handleAutoExecuteAccountErrorActionChange}
+                    ariaLabel={t('monitoring.account_inspection_settings_auto_execute_account_error_action_label')}
+                  />
+                  <span>{t('monitoring.account_inspection_settings_auto_execute_account_error_action_hint')}</span>
+                  {settingsDraft.autoExecuteAccountErrorAction === 'delete' ? (
+                    <div className={styles.settingsDangerNote}>
+                      {t('monitoring.account_inspection_delete_irreversible_warning', {
+                        defaultValue: 'Delete actions cannot be restored from this page. Confirm that auth files are backed up before continuing.',
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </section>
           </div>
         </div>
-
-        <section className={styles.settingsSection}>
-          <div className={styles.settingsSectionHeader}>
-            <div>
-              <strong>{t('monitoring.account_inspection_schedule_section_title')}</strong>
-              <span>{t('monitoring.account_inspection_schedule_section_desc')}</span>
-            </div>
-            <ToggleSwitch
-              checked={scheduleDraft.enabled}
-              onChange={(value) => dispatchBackendState({ type: 'updateScheduleDraft', values: { enabled: value } })}
-              ariaLabel={t('monitoring.account_inspection_schedule_enabled_label')}
-            />
-          </div>
-          <div className={styles.settingsGridCompact}>
-            <div className={styles.settingsFieldHalf}>
-              <Input
-                label={t('monitoring.account_inspection_schedule_interval_label')}
-                type="number"
-                value={scheduleDraft.intervalMinutes}
-                onChange={(event) => dispatchBackendState({ type: 'updateScheduleDraft', values: { intervalMinutes: event.target.value } })}
-                min={SCHEDULE_INTERVAL_LIMITS.min}
-                step={1}
-              />
-              <div className={styles.settingsHint}>{t('monitoring.account_inspection_schedule_interval_hint')}</div>
-            </div>
-            <div className={styles.settingsReadOnlyCard}>
-              <small>{t('monitoring.account_inspection_schedule_next_run')}</small>
-              <strong>{schedule?.nextRunAt ? formatTimestamp(schedule.nextRunAt, i18n.language) : '--'}</strong>
-            </div>
-          </div>
-        </section>
-
-        <section className={styles.settingsSection}>
-          <div className={styles.settingsSectionHeader}>
-            <div>
-              <strong>{t('monitoring.account_inspection_settings_basic_section_title')}</strong>
-              <span>{t('monitoring.account_inspection_settings_basic_section_desc')}</span>
-            </div>
-          </div>
-          <div className={styles.settingsGridCompact}>
-            <div className={styles.settingsFieldHalf}>
-              <label className={styles.settingsLabel}>{t('monitoring.account_inspection_settings_target_type_label')}</label>
-              <Select
-                value={settingsDraft.targetType}
-                options={INSPECTION_TARGET_OPTIONS}
-                onChange={(value) => handleSettingsDraftChange('targetType', value)}
-                ariaLabel={t('monitoring.account_inspection_settings_target_type_label')}
-              />
-              <div className={styles.settingsHint}>{t('monitoring.account_inspection_settings_target_type_hint')}</div>
-            </div>
-            <div className={styles.settingsFieldHalf}>
-              <Input
-                label={t('monitoring.account_inspection_settings_used_percent_threshold_label')}
-                hint={t('monitoring.account_inspection_settings_threshold_hint')}
-                type="number"
-                value={settingsDraft.usedPercentThreshold}
-                onChange={(event) => handleSettingsDraftChange('usedPercentThreshold', event.target.value)}
-                min={THRESHOLD_LIMITS.min}
-                max={THRESHOLD_LIMITS.max}
-                step={0.1}
-              />
-            </div>
-            <div className={styles.settingsFieldHalf}>
-              <Input
-                label={t('monitoring.account_inspection_settings_sample_size_label')}
-                hint={t('monitoring.account_inspection_settings_sample_size_hint')}
-                type="number"
-                value={settingsDraft.sampleSize}
-                onChange={(event) => handleSettingsDraftChange('sampleSize', event.target.value)}
-                min={SAMPLE_SIZE_LIMITS.min}
-                step={1}
-              />
-            </div>
-          </div>
-        </section>
-
-        <section className={styles.settingsSection}>
-          <div className={styles.settingsSectionHeader}>
-            <div>
-              <strong>{t('monitoring.account_inspection_settings_runtime_section_title', { defaultValue: 'Concurrency & Timeout' })}</strong>
-              <span>{t('monitoring.account_inspection_settings_runtime_section_desc', { defaultValue: 'Control inspection throughput, deletion concurrency, timeout and retry behavior.' })}</span>
-            </div>
-          </div>
-          <div className={styles.settingsGridCompact}>
-            <div className={styles.settingsFieldHalf}>
-              <Input
-                label={t('monitoring.account_inspection_settings_workers_label')}
-                hint={t('monitoring.account_inspection_settings_workers_hint', {
-                  min: WORKER_LIMITS.min,
-                  max: WORKER_LIMITS.max,
-                })}
-                type="number"
-                value={settingsDraft.workers}
-                onChange={(event) => handleSettingsDraftChange('workers', event.target.value)}
-                min={WORKER_LIMITS.min}
-                max={WORKER_LIMITS.max}
-                step={1}
-              />
-            </div>
-            <div className={styles.settingsFieldHalf}>
-              <Input
-                label={t('monitoring.account_inspection_settings_delete_workers_label')}
-                hint={t('monitoring.account_inspection_settings_delete_workers_hint', {
-                  min: DELETE_WORKER_LIMITS.min,
-                  max: DELETE_WORKER_LIMITS.max,
-                })}
-                type="number"
-                value={settingsDraft.deleteWorkers}
-                onChange={(event) => handleSettingsDraftChange('deleteWorkers', event.target.value)}
-                min={DELETE_WORKER_LIMITS.min}
-                max={DELETE_WORKER_LIMITS.max}
-                step={1}
-              />
-            </div>
-            <div className={styles.settingsFieldHalf}>
-              <Input
-                label={t('monitoring.account_inspection_settings_timeout_label')}
-                hint={t('monitoring.account_inspection_settings_timeout_hint', {
-                  min: TIMEOUT_LIMITS.min,
-                  max: TIMEOUT_LIMITS.max,
-                })}
-                type="number"
-                value={settingsDraft.timeout}
-                onChange={(event) => handleSettingsDraftChange('timeout', event.target.value)}
-                min={TIMEOUT_LIMITS.min}
-                max={TIMEOUT_LIMITS.max}
-                step={TIMEOUT_LIMITS.step}
-              />
-            </div>
-            <div className={styles.settingsFieldHalf}>
-              <Input
-                label={t('monitoring.account_inspection_settings_retries_label')}
-                hint={t('monitoring.account_inspection_settings_retries_hint', {
-                  min: RETRY_LIMITS.min,
-                  max: RETRY_LIMITS.max,
-                })}
-                type="number"
-                value={settingsDraft.retries}
-                onChange={(event) => handleSettingsDraftChange('retries', event.target.value)}
-                min={RETRY_LIMITS.min}
-                max={RETRY_LIMITS.max}
-                step={1}
-              />
-            </div>
-          </div>
-        </section>
-
-        <section className={styles.settingsSection}>
-          <div className={styles.settingsSectionHeader}>
-            <div>
-              <strong>{t('monitoring.account_inspection_settings_advanced_section_title', { defaultValue: '高级检测' })}</strong>
-              <span>{t('monitoring.account_inspection_settings_advanced_section_desc', { defaultValue: '为特定提供商启用更严格的可用性检测。' })}</span>
-            </div>
-          </div>
-          <div className={styles.settingsPolicyGridTwo}>
-            <div className={styles.settingsPolicyCard}>
-              <label className={styles.settingsLabel}>
-                {t('monitoring.account_inspection_settings_antigravity_quota_mode_label', { defaultValue: 'Antigravity Quota Judgment' })}
-              </label>
-              <Select
-                value={settingsDraft.antigravityQuotaMode}
-                options={ANTIGRAVITY_QUOTA_MODE_OPTIONS.map((option) => ({
-                  value: option.value,
-                  label: t(option.labelKey),
-                }))}
-                onChange={handleAntigravityQuotaModeChange}
-                ariaLabel={t('monitoring.account_inspection_settings_antigravity_quota_mode_label', { defaultValue: 'Antigravity Quota Judgment' })}
-              />
-              <span className={styles.settingsHint}>
-                {t('monitoring.account_inspection_settings_antigravity_quota_mode_hint', { defaultValue: 'Controls how Antigravity quota groups are judged in account inspection and asset overview.' })}
-              </span>
-              <div className={styles.settingsInlineNote}>{draftQuotaModeLabel}</div>
-            </div>
-            <div className={styles.settingsPolicyCard}>
-              <div className={styles.settingsPolicyControl}>
-                <ToggleSwitch
-                  checked={settingsDraft.antigravityDeepProbeEnabled}
-                  onChange={handleAntigravityDeepProbeChange}
-                  label={t('monitoring.account_inspection_settings_antigravity_deep_probe_label', { defaultValue: 'Antigravity 深度检测' })}
-                  ariaLabel={t('monitoring.account_inspection_settings_antigravity_deep_probe_label', { defaultValue: 'Antigravity 深度检测' })}
-                  labelPosition="left"
-                />
-              </div>
-              <span className={styles.settingsHint}>
-                {t('monitoring.account_inspection_settings_antigravity_deep_probe_hint', { defaultValue: '当 Antigravity 配额显示可用时，额外发送一次最小真实请求验证账号是否可用。会增加少量请求成本和巡检耗时。' })}
-              </span>
-              <div className={!settingsDraft.antigravityDeepProbeEnabled ? styles.settingsMutedField : undefined}>
-                <Input
-                  label={t('monitoring.account_inspection_settings_antigravity_deep_probe_model_label', { defaultValue: 'Deep Probe Model' })}
-                  hint={t('monitoring.account_inspection_settings_antigravity_deep_probe_model_hint', { defaultValue: 'Model used for Antigravity generateContent deep probe.' })}
-                  value={settingsDraft.antigravityDeepProbeModel}
-                  onChange={(event) => handleSettingsDraftChange('antigravityDeepProbeModel', event.target.value)}
-                  disabled={!settingsDraft.antigravityDeepProbeEnabled}
-                />
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className={styles.settingsSection}>
-          <div className={styles.settingsSectionHeader}>
-            <div>
-              <strong>{t('monitoring.account_inspection_settings_auto_section_title')}</strong>
-              <span>{t('monitoring.account_inspection_settings_auto_section_desc')}</span>
-            </div>
-          </div>
-          <div className={styles.settingsPolicyGridTwo}>
-            <div className={styles.settingsPolicyCard}>
-              <div className={styles.settingsPolicyControl}>
-                <ToggleSwitch
-                  checked={settingsDraft.autoExecuteQuotaLimitDisable}
-                  onChange={handleAutoExecuteQuotaLimitChange}
-                  label={t('monitoring.account_inspection_settings_auto_execute_quota_limit_disable_label')}
-                  ariaLabel={t('monitoring.account_inspection_settings_auto_execute_quota_limit_disable_label')}
-                  labelPosition="left"
-                />
-              </div>
-              <span className={styles.settingsHint}>
-                {t('monitoring.account_inspection_settings_auto_execute_quota_limit_disable_hint')}
-              </span>
-            </div>
-            <div className={styles.settingsPolicyCard}>
-              <div className={styles.settingsPolicyControl}>
-                <ToggleSwitch
-                  checked={settingsDraft.autoExecuteQuotaRecoveryEnable}
-                  onChange={handleAutoExecuteQuotaRecoveryChange}
-                  label={t('monitoring.account_inspection_settings_auto_execute_quota_recovery_enable_label')}
-                  ariaLabel={t('monitoring.account_inspection_settings_auto_execute_quota_recovery_enable_label')}
-                  labelPosition="left"
-                />
-              </div>
-              <span className={styles.settingsHint}>
-                {t('monitoring.account_inspection_settings_auto_execute_quota_recovery_enable_hint')}
-              </span>
-            </div>
-            <div className={`${styles.settingsPolicyCard} ${styles.settingsDangerPolicyCard}`}>
-              <label className={styles.settingsLabel}>
-                {t('monitoring.account_inspection_settings_auto_execute_account_error_action_label')}
-              </label>
-              <Select
-                value={settingsDraft.autoExecuteAccountErrorAction}
-                options={AUTO_ERROR_ACTION_OPTIONS.map((option) => ({
-                  value: option.value,
-                  label: t(option.labelKey),
-                }))}
-                onChange={handleAutoExecuteAccountErrorActionChange}
-                ariaLabel={t('monitoring.account_inspection_settings_auto_execute_account_error_action_label')}
-              />
-              <span className={styles.settingsHint}>
-                {t('monitoring.account_inspection_settings_auto_execute_account_error_action_hint')}
-              </span>
-              {settingsDraft.autoExecuteAccountErrorAction === 'delete' ? (
-                <div className={styles.settingsDangerNote}>
-                  {t('monitoring.account_inspection_delete_irreversible_warning', {
-                    defaultValue: 'Delete actions cannot be restored from this page. Confirm that auth files are backed up before continuing.',
-                  })}
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </section>
 
         <div className={styles.settingsActionsBar}>
           <Button variant="secondary" onClick={handleResetSettings}>
