@@ -3,7 +3,7 @@ name: Publish CLIProxyAPI Pro Management
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */12 * * *'
+    - cron: '0 20 * * *'
 
 jobs:
   check-version:
@@ -14,14 +14,14 @@ jobs:
 
     outputs:
       should_release: ${{ steps.compare.outputs.should_release }}
-      current_tag: ${{ steps.compare.outputs.current_tag }}
-      current_base_version: ${{ steps.compare.outputs.current_base_version }}
+      target_release_tag: ${{ steps.compare.outputs.target_release_tag }}
+      current_management_tag: ${{ steps.compare.outputs.current_management_tag }}
       upstream_tag: ${{ steps.compare.outputs.upstream_tag }}
       upstream_base_version: ${{ steps.compare.outputs.upstream_base_version }}
-      release_tag: ${{ steps.compare.outputs.release_tag }}
+      build_version: ${{ steps.compare.outputs.build_version }}
 
     steps:
-      - name: Compare latest release versions
+      - name: Compare latest management release
         id: compare
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -37,19 +37,13 @@ jobs:
             echo "${version}"
           }
 
-          pro_tag_for() {
-            local version="$1"
-            version="${version%-pro}"
-            echo "${version}-pro"
-          }
-
           version_gt() {
             local left="$1"
             local right="$2"
             [ "$(printf '%s\n%s\n' "${right}" "${left}" | sort -V | tail -n 1)" = "${left}" ] && [ "${left}" != "${right}" ]
           }
 
-          current_tag="$(gh release view --repo "${CURRENT_REPO}" --json tagName --jq '.tagName' 2>/dev/null || true)"
+          target_release_tag="$(gh release view --repo "${CURRENT_REPO}" --json tagName --jq '.tagName' 2>/dev/null || true)"
           upstream_tag="$(gh release view --repo "${UPSTREAM_REPO}" --json tagName --jq '.tagName')"
 
           if [ -z "${upstream_tag}" ]; then
@@ -57,33 +51,51 @@ jobs:
             exit 1
           fi
 
-          current_base_version="0.0.0"
-          if [ -n "${current_tag}" ]; then
-            current_base_version="$(normalize_version "${current_tag}")"
+          if [ -z "${target_release_tag}" ]; then
+            echo "No current Pro release found. Management-only update will wait for the core release workflow."
+            echo "should_release=false" >> "${GITHUB_OUTPUT}"
+            echo "target_release_tag=" >> "${GITHUB_OUTPUT}"
+            echo "current_management_tag=" >> "${GITHUB_OUTPUT}"
+            echo "upstream_tag=${upstream_tag}" >> "${GITHUB_OUTPUT}"
+            echo "upstream_base_version=$(normalize_version "${upstream_tag}")" >> "${GITHUB_OUTPUT}"
+            echo "build_version=v$(normalize_version "${upstream_tag}")-pro" >> "${GITHUB_OUTPUT}"
+            exit 0
           fi
 
+          current_body="$(gh release view "${target_release_tag}" --repo "${CURRENT_REPO}" --json body --jq '.body // ""')"
+          current_management_tag="$(printf '%s\n' "${current_body}" | sed -n 's/^- Management upstream release: //p' | head -n 1)"
+          has_management_asset="$(gh release view "${target_release_tag}" --repo "${CURRENT_REPO}" --json assets --jq 'any(.assets[]; .name == "management.html")')"
+
           upstream_base_version="$(normalize_version "${upstream_tag}")"
-          release_tag="$(pro_tag_for "${upstream_tag}")"
+          current_base_version="0.0.0"
+          if [ -n "${current_management_tag}" ]; then
+            current_base_version="$(normalize_version "${current_management_tag}")"
+          fi
+          build_version="v${upstream_base_version}-pro"
 
           should_release="false"
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            should_release="true"
+          elif [ "${has_management_asset}" != "true" ]; then
             should_release="true"
           elif version_gt "${upstream_base_version}" "${current_base_version}"; then
             should_release="true"
           fi
 
-          echo "current_tag=${current_tag:-none}"
+          echo "target_release_tag=${target_release_tag}"
+          echo "current_management_tag=${current_management_tag:-none}"
           echo "current_base_version=${current_base_version}"
           echo "upstream_tag=${upstream_tag}"
           echo "upstream_base_version=${upstream_base_version}"
-          echo "release_tag=${release_tag}"
+          echo "build_version=${build_version}"
+          echo "has_management_asset=${has_management_asset}"
           echo "should_release=${should_release}"
 
-          echo "current_tag=${current_tag}" >> "${GITHUB_OUTPUT}"
-          echo "current_base_version=${current_base_version}" >> "${GITHUB_OUTPUT}"
+          echo "target_release_tag=${target_release_tag}" >> "${GITHUB_OUTPUT}"
+          echo "current_management_tag=${current_management_tag}" >> "${GITHUB_OUTPUT}"
           echo "upstream_tag=${upstream_tag}" >> "${GITHUB_OUTPUT}"
           echo "upstream_base_version=${upstream_base_version}" >> "${GITHUB_OUTPUT}"
-          echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+          echo "build_version=${build_version}" >> "${GITHUB_OUTPUT}"
           echo "should_release=${should_release}" >> "${GITHUB_OUTPUT}"
 
   build-and-release:
@@ -102,7 +114,7 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Checkout upstream latest release
+      - name: Checkout management upstream release
         uses: actions/checkout@v5
         with:
           repository: router-for-me/Cli-Proxy-API-Management-Center
@@ -117,7 +129,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
           cache: npm
           cache-dependency-path: upstream/package-lock.json
 
@@ -127,80 +139,91 @@ jobs:
 
       - name: Build all-in-one HTML
         working-directory: upstream
-        run: npm run build
         env:
-          VERSION: ${{ needs.check-version.outputs.release_tag }}
+          VERSION: ${{ needs.check-version.outputs.build_version }}
+        run: npm run build
 
-      - name: Prepare release assets
+      - name: Prepare release asset
         working-directory: upstream
         run: |
+          set -euo pipefail
           cd dist
           mv index.html management.html
           ls -lh management.html
 
-      - name: Generate release notes
+      - name: Update release notes and upload management asset
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          UPSTREAM_REPO: router-for-me/Cli-Proxy-API-Management-Center
+          CURRENT_REPO: ${{ github.repository }}
+          TARGET_RELEASE_TAG: ${{ needs.check-version.outputs.target_release_tag }}
+          MANAGEMENT_TAG: ${{ needs.check-version.outputs.upstream_tag }}
+          MANAGEMENT_BUILD_VERSION: ${{ needs.check-version.outputs.build_version }}
+          MANAGEMENT_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
 
-          current_tag="${{ needs.check-version.outputs.current_tag }}"
-          current_base_version="${{ needs.check-version.outputs.current_base_version }}"
-          upstream_tag="${{ needs.check-version.outputs.upstream_tag }}"
-          upstream_base_version="${{ needs.check-version.outputs.upstream_base_version }}"
-          release_tag="${{ needs.check-version.outputs.release_tag }}"
-          upstream_sha="$(git -C upstream rev-parse HEAD)"
+          gh release view "${TARGET_RELEASE_TAG}" --repo "${CURRENT_REPO}" --json body --jq '.body // ""' > current-release-notes.md
+          gh release view "${MANAGEMENT_TAG}" --repo router-for-me/Cli-Proxy-API-Management-Center --json body --jq '.body // ""' > management-upstream-notes.md
+          management_sha="$(git -C upstream rev-parse HEAD)"
           customization_sha="$(git -C customizations-repo rev-parse HEAD)"
 
-          upstream_notes="$(gh release view "${upstream_tag}" --repo "${UPSTREAM_REPO}" --json body --jq '.body // ""')"
+          export MANAGEMENT_SHA="${management_sha}"
+          export CUSTOMIZATION_SHA="${customization_sha}"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
 
-          : > release-notes.md
-          {
-            echo "Customized build of router-for-me/Cli-Proxy-API-Management-Center."
-            echo
-            echo "## Version mapping"
-            echo
-            echo "- Current latest release: ${current_tag:-none}"
-            echo "- Current comparable version: ${current_base_version}"
-            echo "- Upstream latest release: ${upstream_tag}"
-            echo "- Upstream comparable version: ${upstream_base_version}"
-            echo "- New release tag: ${release_tag}"
-            echo "- Upstream commit: ${upstream_sha}"
-            echo "- Customization commit: ${customization_sha}"
-            echo
-            echo "## Included Pro customizations"
-            echo
-            echo "- Request monitoring page backed by the Pro usage API."
-            echo "- Account inspection page with frontend and backend scheduled inspection support."
-            echo "- SQLite-backed quota cache and model price persistence."
-            echo "- Pro locale, route, API client, and UI integration patches."
-            echo
-            echo "## Upstream release notes"
-            echo
-            if [ -n "${upstream_notes}" ]; then
-              printf '%s\n' "${upstream_notes}"
-            else
-              echo "No upstream release notes were provided."
-            fi
-          } >> release-notes.md
+          body = Path('current-release-notes.md').read_text()
+          upstream_notes = Path('management-upstream-notes.md').read_text().strip()
+          management_tag = os.environ['MANAGEMENT_TAG']
+          management_build_version = os.environ['MANAGEMENT_BUILD_VERSION']
+          management_sha = os.environ['MANAGEMENT_SHA']
+          customization_sha = os.environ['CUSTOMIZATION_SHA']
 
-      - name: Create Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if gh release view "${{ needs.check-version.outputs.release_tag }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            gh release upload "${{ needs.check-version.outputs.release_tag }}" \
-              upstream/dist/management.html \
-              --repo "${{ github.repository }}" \
-              --clobber
-          else
-            gh release create "${{ needs.check-version.outputs.release_tag }}" \
-              upstream/dist/management.html \
-              --repo "${{ github.repository }}" \
-              --title "${{ needs.check-version.outputs.release_tag }}" \
-              --notes-file release-notes.md
-          fi
+          def replace_line(text, prefix, line):
+              lines = text.splitlines()
+              replaced = False
+              for index, current in enumerate(lines):
+                  if current.startswith(prefix):
+                      lines[index] = line
+                      replaced = True
+                      break
+              if not replaced:
+                  lines.append(line)
+              return '\n'.join(lines) + ('\n' if text.endswith('\n') or lines else '')
+
+          body = replace_line(body, '- Management upstream release:', f'- Management upstream release: {management_tag}')
+          body = replace_line(body, '- Management build version:', f'- Management build version: {management_build_version}')
+          body = replace_line(body, '- Management upstream commit:', f'- Management upstream commit: {management_sha}')
+          body = replace_line(body, '- Customization commit:', f'- Customization commit: {customization_sha}')
+
+          start = '<!-- cli-proxyapi-pro-management-start -->'
+          end = '<!-- cli-proxyapi-pro-management-end -->'
+          section = (
+              f'{start}\n'
+              '## Management upstream release notes\n\n'
+              f'{upstream_notes if upstream_notes else "No management upstream release notes were provided."}\n'
+              f'{end}'
+          )
+          if start in body and end in body:
+              before = body.split(start, 1)[0].rstrip()
+              after = body.split(end, 1)[1].lstrip()
+              body = f'{before}\n\n{section}\n'
+              if after:
+                  body += f'\n{after}'
+          else:
+              body = body.rstrip() + f'\n\n{section}\n'
+
+          Path('release-notes.md').write_text(body)
+          PY
+
+          gh release edit "${TARGET_RELEASE_TAG}" \
+            --repo "${CURRENT_REPO}" \
+            --notes-file release-notes.md
+          gh release upload "${TARGET_RELEASE_TAG}" \
+            upstream/dist/management.html \
+            --repo "${CURRENT_REPO}" \
+            --clobber
 
   cleanup-runs:
     runs-on: ubuntu-latest

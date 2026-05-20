@@ -1,4 +1,4 @@
-name: Publish CLIProxyAPI Pro Image
+name: Publish CLIProxyAPI Pro Release
 
 on:
   workflow_dispatch:
@@ -7,106 +7,346 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-  
+
 jobs:
-  build-and-push:
+  check-version:
     runs-on: ubuntu-latest
-    
+
+    permissions:
+      contents: read
+
+    outputs:
+      should_release: ${{ steps.compare.outputs.should_release }}
+      core_tag: ${{ steps.compare.outputs.core_tag }}
+      core_version: ${{ steps.compare.outputs.core_version }}
+      release_tag: ${{ steps.compare.outputs.release_tag }}
+      release_version: ${{ steps.compare.outputs.release_version }}
+      management_tag: ${{ steps.compare.outputs.management_tag }}
+      management_version: ${{ steps.compare.outputs.management_version }}
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Get latest release info
-        id: get_latest_tag
+      - name: Compare latest core release
+        id: compare
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURRENT_REPO: ${{ github.repository }}
+          CORE_UPSTREAM_REPO: router-for-me/CLIProxyAPI
+          MANAGEMENT_UPSTREAM_REPO: router-for-me/Cli-Proxy-API-Management-Center
         run: |
-          RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/repos/router-for-me/CLIProxyAPI/releases/latest)
-          
-          if echo "$RESPONSE" | grep -q "API rate limit"; then
-             echo "Error: API rate limit exceeded."
-             exit 1
+          set -euo pipefail
+
+          normalize_version() {
+            local version="$1"
+            version="${version#v}"
+            version="${version%-pro}"
+            echo "${version}"
+          }
+
+          pro_tag_for() {
+            local tag="$1"
+            tag="${tag%-pro}"
+            echo "${tag}-pro"
+          }
+
+          version_gt() {
+            local left="$1"
+            local right="$2"
+            [ "$(printf '%s\n%s\n' "${right}" "${left}" | sort -V | tail -n 1)" = "${left}" ] && [ "${left}" != "${right}" ]
+          }
+
+          core_tag="$(gh release view --repo "${CORE_UPSTREAM_REPO}" --json tagName --jq '.tagName')"
+          management_tag="$(gh release view --repo "${MANAGEMENT_UPSTREAM_REPO}" --json tagName --jq '.tagName')"
+          current_tag="$(gh release view --repo "${CURRENT_REPO}" --json tagName --jq '.tagName' 2>/dev/null || true)"
+
+          core_version="$(normalize_version "${core_tag}")"
+          management_version="$(normalize_version "${management_tag}")"
+          release_tag="$(pro_tag_for "${core_tag}")"
+          release_version="${release_tag#v}"
+
+          current_version="0.0.0"
+          if [ -n "${current_tag}" ]; then
+            current_version="$(normalize_version "${current_tag}")"
           fi
 
-          LATEST_TAG=$(echo "$RESPONSE" | jq -r .tag_name)
-          RELEASE_BODY=$(echo "$RESPONSE" | jq -r .body)
-          
-          if [ "$LATEST_TAG" == "null" ] || [ -z "$LATEST_TAG" ]; then
-            echo "Error: Could not retrieve latest tag."
-            exit 1
+          target_exists="false"
+          if gh release view "${release_tag}" --repo "${CURRENT_REPO}" >/dev/null 2>&1; then
+            target_exists="true"
           fi
 
-          echo "Latest tag: $LATEST_TAG"
-          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
-          
-          {
-            echo "release_body<<EOF"
-            echo "$RELEASE_BODY"
-            echo "EOF"
-          } >> $GITHUB_OUTPUT
-
-      - name: Get current Docker image version
-        id: get_current_version
-        run: |
-          CURRENT_TAG=$(curl -s https://hub.docker.com/v2/repositories/${{ secrets.DOCKER_USERNAME }}/cliproxyapi-pro/tags/ | jq -r '.results[]?.name // empty' | grep -v "latest" | sort -V | tail -n 1)
-          
-          if [ -z "$CURRENT_TAG" ]; then
-            CURRENT_TAG="0.0.0"
+          should_release="false"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            should_release="true"
+          elif [ "${target_exists}" = "false" ]; then
+            should_release="true"
+          elif version_gt "${core_version}" "${current_version}"; then
+            should_release="true"
           fi
-          
-          echo "Current Docker image version: $CURRENT_TAG"
-          echo "current_tag=$CURRENT_TAG" >> $GITHUB_OUTPUT
 
-      - name: Compare versions
-        id: compare_versions
-        run: |
-          LATEST_TAG="${{ steps.get_latest_tag.outputs.latest_tag }}"
-          CURRENT_TAG="${{ steps.get_current_version.outputs.current_tag }}"
+          echo "current_tag=${current_tag:-none}"
+          echo "current_version=${current_version}"
+          echo "core_tag=${core_tag}"
+          echo "core_version=${core_version}"
+          echo "management_tag=${management_tag}"
+          echo "management_version=${management_version}"
+          echo "release_tag=${release_tag}"
+          echo "release_version=${release_version}"
+          echo "should_release=${should_release}"
 
-          LATEST_VERSION=$(echo "$LATEST_TAG" | sed 's/^v//')
-          CURRENT_VERSION=$(echo "$CURRENT_TAG" | sed 's/^v//')
+          echo "core_tag=${core_tag}" >> "${GITHUB_OUTPUT}"
+          echo "core_version=${core_version}" >> "${GITHUB_OUTPUT}"
+          echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+          echo "release_version=${release_version}" >> "${GITHUB_OUTPUT}"
+          echo "management_tag=${management_tag}" >> "${GITHUB_OUTPUT}"
+          echo "management_version=${management_version}" >> "${GITHUB_OUTPUT}"
+          echo "should_release=${should_release}" >> "${GITHUB_OUTPUT}"
 
-          if [ "$LATEST_VERSION" == "$CURRENT_VERSION" ]; then
-            echo "Versions match ($LATEST_VERSION). No build required."
-            echo "should_build=false" >> $GITHUB_OUTPUT
-          else
-            HIGHER_VERSION=$(echo -e "$LATEST_VERSION\n$CURRENT_VERSION" | sort -V | tail -n 1)
-            
-            if [ "$HIGHER_VERSION" == "$LATEST_VERSION" ]; then
-               echo "New version detected: $LATEST_VERSION > $CURRENT_VERSION"
-               echo "should_build=true" >> $GITHUB_OUTPUT
-            else
-               echo "Current version ($CURRENT_VERSION) is higher or equal to latest ($LATEST_VERSION). Skipping."
-               echo "should_build=false" >> $GITHUB_OUTPUT
-            fi
-          fi
+  build-and-release:
+    needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout customizations
+        uses: actions/checkout@v5
+        with:
+          path: customizations-repo
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Checkout core upstream release
+        uses: actions/checkout@v5
+        with:
+          repository: router-for-me/CLIProxyAPI
+          ref: ${{ needs.check-version.outputs.core_tag }}
+          path: upstream-core
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Checkout management upstream release
+        uses: actions/checkout@v5
+        with:
+          repository: router-for-me/Cli-Proxy-API-Management-Center
+          ref: ${{ needs.check-version.outputs.management_tag }}
+          path: upstream-management
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up Docker Buildx
-        if: steps.compare_versions.outputs.should_build == 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub
-        if: steps.compare_versions.outputs.should_build == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Build and push Docker image
-        if: steps.compare_versions.outputs.should_build == 'true'
         uses: docker/build-push-action@v6
         with:
-          context: ./cliproxyapi-pro-core
+          context: ./customizations-repo/cliproxyapi-pro-core
           platforms: linux/amd64,linux/arm64
           build-args: |
-            CLIPROXY_VERSION=${{ steps.get_latest_tag.outputs.latest_tag }}
+            CLIPROXY_VERSION=${{ needs.check-version.outputs.core_tag }}
+            CLIPROXY_BUILD_VERSION=${{ needs.check-version.outputs.release_tag }}
           push: true
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/cliproxyapi-pro:latest
-            ${{ secrets.DOCKER_USERNAME }}/cliproxyapi-pro:${{ steps.get_latest_tag.outputs.latest_tag }}
+            ${{ secrets.DOCKER_USERNAME }}/cliproxyapi-pro:${{ needs.check-version.outputs.release_tag }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: upstream-core/go.mod
+          cache: true
+          cache-dependency-path: upstream-core/go.sum
+
+      - name: Prepare Pro core source
+        env:
+          SRC_ROOT: ${{ github.workspace }}/upstream-core
+          RELEASE_TAG: ${{ needs.check-version.outputs.release_tag }}
+          CORE_TAG: ${{ needs.check-version.outputs.core_tag }}
+        run: |
+          set -euo pipefail
+          git -C upstream-core fetch --depth 1 https://github.com/router-for-me/models.git main
+          git -C upstream-core show FETCH_HEAD:models.json > upstream-core/internal/registry/models/models.json
+          python3 customizations-repo/cliproxyapi-pro-core/patches/apply_upstream_patches.py
+          cp customizations-repo/README.md upstream-core/README.md
+          cp customizations-repo/README_EN.md upstream-core/README_EN.md
+          cd upstream-core
+          go mod tidy
+          cat > .goreleaser.pro.yml <<'EOF'
+          version: 2
+          project_name: CLIProxyAPI-Pro
+
+          builds:
+            - id: cli-proxy-api
+              env:
+                - CGO_ENABLED=0
+              goos:
+                - linux
+                - windows
+                - darwin
+                - freebsd
+              goarch:
+                - amd64
+                - arm64
+              main: ./cmd/server/
+              binary: cli-proxy-api
+              ldflags:
+                - -s -w -X 'main.Version={{ .Env.RELEASE_TAG }}' -X 'main.Commit=release-{{ .Env.CORE_TAG }}' -X 'main.BuildDate={{ .Date }}'
+
+          archives:
+            - id: cli-proxy-api
+              format: tar.gz
+              name_template: >-
+                {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{- if eq .Arch "arm64" -}}aarch64{{- else -}}{{ .Arch }}{{- end -}}
+              format_overrides:
+                - goos: windows
+                  format: zip
+              files:
+                - LICENSE
+                - README.md
+                - README_EN.md
+                - config.example.yaml
+
+          checksum:
+            name_template: checksums.txt
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          git diff --cached --quiet || git commit -m "Apply CLIProxyAPI Pro release customizations"
+          git tag -f "${RELEASE_TAG}"
+
+      - name: Build Pro core binaries
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean --skip=publish --skip=validate -f .goreleaser.pro.yml
+          workdir: upstream-core
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.check-version.outputs.release_tag }}
+          CORE_TAG: ${{ needs.check-version.outputs.core_tag }}
+
+      - name: Apply Pro management customizations
+        run: bash customizations-repo/cliproxyapi-pro-management/apply.sh upstream-management
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: upstream-management/package-lock.json
+
+      - name: Install management dependencies
+        working-directory: upstream-management
+        run: npm ci
+
+      - name: Build management HTML
+        working-directory: upstream-management
+        env:
+          VERSION: v${{ needs.check-version.outputs.management_version }}-pro
+        run: npm run build
+
+      - name: Prepare management asset
+        working-directory: upstream-management
+        run: |
+          set -euo pipefail
+          cd dist
+          mv index.html management.html
+          ls -lh management.html
+
+      - name: Generate release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CORE_UPSTREAM_REPO: router-for-me/CLIProxyAPI
+          MANAGEMENT_UPSTREAM_REPO: router-for-me/Cli-Proxy-API-Management-Center
+          RELEASE_TAG: ${{ needs.check-version.outputs.release_tag }}
+          RELEASE_VERSION: ${{ needs.check-version.outputs.release_version }}
+          CORE_TAG: ${{ needs.check-version.outputs.core_tag }}
+          CORE_VERSION: ${{ needs.check-version.outputs.core_version }}
+          MANAGEMENT_TAG: ${{ needs.check-version.outputs.management_tag }}
+          MANAGEMENT_VERSION: ${{ needs.check-version.outputs.management_version }}
+        run: |
+          set -euo pipefail
+          core_notes="$(gh release view "${CORE_TAG}" --repo "${CORE_UPSTREAM_REPO}" --json body --jq '.body // ""')"
+          management_notes="$(gh release view "${MANAGEMENT_TAG}" --repo "${MANAGEMENT_UPSTREAM_REPO}" --json body --jq '.body // ""')"
+          core_sha="$(git -C upstream-core rev-parse HEAD)"
+          management_sha="$(git -C upstream-management rev-parse HEAD)"
+          customization_sha="$(git -C customizations-repo rev-parse HEAD)"
+
+          : > release-notes.md
+          {
+            echo "CLIProxyAPI Pro release built from the latest core and management upstream releases."
+            echo
+            echo "## Version mapping"
+            echo
+            echo "- Release tag: ${RELEASE_TAG}"
+            echo "- Core upstream release: ${CORE_TAG}"
+            echo "- Core build version: ${RELEASE_TAG}"
+            echo "- Management upstream release: ${MANAGEMENT_TAG}"
+            echo "- Management build version: v${MANAGEMENT_VERSION}-pro"
+            echo "- Core upstream commit: ${core_sha}"
+            echo "- Management upstream commit: ${management_sha}"
+            echo "- Customization commit: ${customization_sha}"
+            echo
+            echo "## Assets"
+            echo
+            echo "- Pro core binaries use the upstream platform matrix and archive formats."
+            echo "- Pro management panel is published as management.html for automatic panel updates."
+            echo
+            echo "<!-- cli-proxyapi-pro-core-start -->"
+            echo "## Core upstream release notes"
+            echo
+            if [ -n "${core_notes}" ]; then
+              printf '%s\n' "${core_notes}"
+            else
+              echo "No core upstream release notes were provided."
+            fi
+            echo "<!-- cli-proxyapi-pro-core-end -->"
+            echo
+            echo "<!-- cli-proxyapi-pro-management-start -->"
+            echo "## Management upstream release notes"
+            echo
+            if [ -n "${management_notes}" ]; then
+              printf '%s\n' "${management_notes}"
+            else
+              echo "No management upstream release notes were provided."
+            fi
+            echo "<!-- cli-proxyapi-pro-management-end -->"
+          } >> release-notes.md
+
+      - name: Create or update Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.check-version.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release edit "${RELEASE_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "${RELEASE_TAG}" \
+              --notes-file release-notes.md
+          else
+            gh release create "${RELEASE_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "${RELEASE_TAG}" \
+              --notes-file release-notes.md
+          fi
+          gh release upload "${RELEASE_TAG}" \
+            upstream-core/dist/*.tar.gz \
+            upstream-core/dist/*.zip \
+            upstream-core/dist/checksums.txt \
+            upstream-management/dist/management.html \
+            --repo "${GITHUB_REPOSITORY}" \
+            --clobber
 
       - name: Backup usage statistics to WebDAV
-        if: steps.compare_versions.outputs.should_build == 'true'
         continue-on-error: true
         env:
           USAGE_BACKUP_TARGETS: ${{ secrets.CLIPROXY_USAGE_BACKUP_TARGETS }}
@@ -191,7 +431,6 @@ jobs:
           echo "✅ Usage backup completed."
 
       - name: Trigger Render Deployment
-        if: steps.compare_versions.outputs.should_build == 'true'
         continue-on-error: true
         env:
           RENDER_DEPLOY_HOOKS: ${{ secrets.CLIPROXY_RENDER_DEPLOY_HOOKS }}
@@ -235,76 +474,53 @@ jobs:
           done
 
       - name: Send Telegram notification
-        if: steps.compare_versions.outputs.should_build == 'true'
         env:
-          GITHUB_REPO: ${{ github.repository }} 
-          RELEASE_TAG: ${{ steps.get_latest_tag.outputs.latest_tag }}
-          RELEASE_BODY: ${{ steps.get_latest_tag.outputs.release_body }}
+          GITHUB_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.check-version.outputs.release_tag }}
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
           cat << 'EOF' > telegram_notify.py
           import os
-          import re
           import html
           import json
           import urllib.request
-          
+
           repo = os.environ.get('GITHUB_REPO', '')
           tag = os.environ.get('RELEASE_TAG', 'Unknown')
-          body = os.environ.get('RELEASE_BODY', '')
           chat_id = os.environ.get('CHAT_ID')
           bot_token = os.environ.get('BOT_TOKEN')
           docker_username = os.environ.get('DOCKER_USERNAME', 'unknown')
-          
           docker_url = f'https://hub.docker.com/r/{docker_username}/cliproxyapi-pro/tags'
-          repo_url = f'https://github.com/{repo}'
+          release_url = f'https://github.com/{repo}/releases/tag/{tag}'
 
-          def process_changelog(text):
-              if not text: 
-                  return "No changelog provided."
-              
-              text = re.sub(r'^##\s*Changelog.*$', '', text, flags=re.MULTILINE | re.IGNORECASE).strip()
-              text = html.escape(text)
-              
-              def hash_replacer(match):
-                  return f'• <a href="{repo_url}/commit/{match.group(2)}">{match.group(2)[:7]}</a>'
-              text = re.sub(r'(^\* )([a-f0-9]{40})', hash_replacer, text, flags=re.MULTILINE)
-
-              text = re.sub(r'(?<!\w)#(\d+)', f'<a href="{repo_url}/pull/\\1">#\\1</a>', text)
-              text = re.sub(r'`([^`]+)`', r'<code>\1</code>', text)
-              text = re.sub(r'\[([^\]]+)\]\((https?://[^)]+)\)', r'<a href="\2">\1</a>', text)
-              return text
-
-          formatted_body = process_changelog(body)
-
-          msg_header = f'🚀 <b>New CLIProxyAPI Pro Image Pushed!</b>\n'
-          msg_deploy = f'☁️ <b>Render Deploy Triggered</b>\n\n'
-          msg_info = f'📦 <b>Version:</b> <code>{tag}</code>\n🐳 <a href="{docker_url}">DockerHub</a>\n\n'
-          msg_content = f'<b>📝 Changelog:</b>\n\n{formatted_body}'
-          
-          full_text = msg_header + msg_deploy + msg_info + msg_content
+          full_text = (
+              '🚀 <b>New CLIProxyAPI Pro Release Published!</b>\n\n'
+              f'📦 <b>Version:</b> <code>{html.escape(tag)}</code>\n'
+              f'🐳 <a href="{html.escape(docker_url)}">DockerHub</a>\n'
+              f'📝 <a href="{html.escape(release_url)}">Release notes</a>'
+          )
 
           payload = {
-              'chat_id': chat_id, 
-              'text': full_text, 
-              'parse_mode': 'HTML', 
-              'disable_web_page_preview': True
+              'chat_id': chat_id,
+              'text': full_text,
+              'parse_mode': 'HTML',
+              'disable_web_page_preview': True,
           }
 
           req = urllib.request.Request(
               f'https://api.telegram.org/bot{bot_token}/sendMessage',
               data=json.dumps(payload).encode('utf-8'),
-              headers={'Content-Type': 'application/json'}
+              headers={'Content-Type': 'application/json'},
           )
-          
+
           try:
               if bot_token and chat_id:
-                  with urllib.request.urlopen(req) as response:
+                  with urllib.request.urlopen(req):
                       print('✅ Notification sent.')
               else:
-                  print("⚠️ Telegram details missing.")
+                  print('⚠️ Telegram details missing.')
           except Exception as e:
               print(f'❌ Error: {e}')
           EOF
@@ -313,7 +529,7 @@ jobs:
 
   cleanup-runs:
     runs-on: ubuntu-latest
-    needs: build-and-push
+    needs: build-and-release
     permissions:
       actions: write
       contents: read
