@@ -1,7 +1,11 @@
 package embeddedusage
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/embeddedusage/internalusage"
@@ -36,6 +40,8 @@ func Start(ctx context.Context) (*Service, error) {
 	}
 	service.server = NewServer(cfg, store)
 	go service.collect(ctx)
+	go service.maintain(ctx)
+	go service.runWebDAVBackups(ctx)
 	go func() {
 		<-ctx.Done()
 		if err := store.Close(); err != nil {
@@ -90,4 +96,84 @@ func (s *Service) collect(ctx context.Context) {
 			log.WithError(err).Warn("failed to insert embedded usage events")
 		}
 	}
+}
+
+func (s *Service) maintain(ctx context.Context) {
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		if deleted, err := s.store.ApplyRetention(ctx, time.Now()); err != nil {
+			log.WithError(err).Warn("failed to apply embedded usage retention")
+		} else if deleted > 0 {
+			log.Infof("embedded usage retention deleted %d events", deleted)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *Service) runWebDAVBackups(ctx context.Context) {
+	var lastBackup time.Time
+	for {
+		settings, err := s.store.GetMonitoringSettings(ctx)
+		if err != nil {
+			log.WithError(err).Warn("failed to load monitoring settings")
+		} else if shouldRunWebDAVBackup(settings, lastBackup) {
+			if err := s.backupToWebDAV(ctx, settings.WebDAV); err != nil {
+				log.WithError(err).Warn("failed to backup embedded usage to WebDAV")
+			} else {
+				lastBackup = time.Now()
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Minute):
+		}
+	}
+}
+
+func shouldRunWebDAVBackup(settings MonitoringSettings, lastBackup time.Time) bool {
+	webdav := normalizeMonitoringSettings(settings).WebDAV
+	if !webdav.Enabled || webdav.URL == "" {
+		return false
+	}
+	if lastBackup.IsZero() {
+		return true
+	}
+	return time.Since(lastBackup) >= time.Duration(webdav.IntervalMinutes)*time.Minute
+}
+
+func (s *Service) backupToWebDAV(ctx context.Context, cfg MonitoringWebDAVBackupConfig) error {
+	cfg = normalizeMonitoringSettings(MonitoringSettings{WebDAV: cfg}).WebDAV
+	if !cfg.Enabled || cfg.URL == "" {
+		return nil
+	}
+	data, err := s.server.exportJSONL(ctx)
+	if err != nil {
+		return err
+	}
+	url := strings.TrimRight(cfg.URL, "/") + fmt.Sprintf("/usage-export-%s.jsonl", time.Now().UTC().Format("20060102_150405"))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-ndjson")
+	if cfg.Username != "" || cfg.Password != "" {
+		req.SetBasicAuth(cfg.Username, cfg.Password)
+	}
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return fmt.Errorf("webdav upload failed with status %d", response.StatusCode)
+	}
+	log.Infof("embedded usage backup uploaded to WebDAV: %s", url)
+	return nil
 }

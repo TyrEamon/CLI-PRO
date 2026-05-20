@@ -25,7 +25,7 @@ CLIProxyAPI Pro 是对两个 upstream 项目的最小化定制层集合：
 │
 └── .github/workflows/
     ├── release-core.yml
-    └── release-mangement.yml
+    └── release-management.yml
 ```
 
 ## 子项目说明
@@ -37,6 +37,7 @@ CLIProxyAPI Pro 是对两个 upstream 项目的最小化定制层集合：
 主要能力：
 
 - 构建 upstream CLIProxyAPI release 的多架构 Docker 镜像。
+- 构建与 upstream 平台和打包格式一致的 Pro 二进制 release 资产。
 - 内嵌 SQLite usage service。
 - 暴露 `/v0/management/usage` 系列 API，包括状态、增量事件轮询和 SSE 流。
 - 支持 usage JSONL/NDJSON 导入导出，包含 usage events、模型价格、quota cache 和账号巡检调度。
@@ -52,7 +53,7 @@ CLIProxyAPI Pro 是对两个 upstream 项目的最小化定制层集合：
 详见：
 
 - `cliproxyapi-pro-core/README.md`
-- `cliproxyapi-pro-core/README_CN.md`
+- `cliproxyapi-pro-core/README_EN.md`
 
 ### cliproxyapi-pro-management
 
@@ -67,6 +68,8 @@ CLIProxyAPI Pro 是对两个 upstream 项目的最小化定制层集合：
 - quota cache SQLite 持久化。
 - 配额卡片缓存时间显示和单卡刷新。
 - 对接后端账号巡检，负责运行控制、状态轮询、结果展示和操作确认。
+- 认证文件页面可显示巡检写入的 `last_error` 健康消息。
+- 账号巡检结果表格的刷新/重检操作会反馈令牌刷新结果或重检后的业务判定。
 - 账号禁用、启用、删除建议与执行。
 - 多语言文案补丁。
 - 最小化 overlay + patch 应用流程。
@@ -74,7 +77,7 @@ CLIProxyAPI Pro 是对两个 upstream 项目的最小化定制层集合：
 详见：
 
 - `cliproxyapi-pro-management/README.md`
-- `cliproxyapi-pro-management/README_CN.md`
+- `cliproxyapi-pro-management/README_EN.md`
 
 ## 前后端关系
 
@@ -91,6 +94,7 @@ CLIProxyAPI Pro 是对两个 upstream 项目的最小化定制层集合：
 /v0/management/usage/import
 /v0/management/usage/quota-cache
 /v0/management/usage/model-prices
+/v0/management/usage/settings
 /v0/management/account-inspection/schedule
 /v0/management/account-inspection/status
 /v0/management/account-inspection/logs
@@ -111,7 +115,7 @@ CLIProxyAPI Pro 是对两个 upstream 项目的最小化定制层集合：
 
 ## 发布流程
 
-### Core 镜像发布
+### 统一 Pro Release 发布
 
 Workflow：
 
@@ -119,48 +123,74 @@ Workflow：
 .github/workflows/release-core.yml
 ```
 
-流程概览：
-
-1. 检查 upstream `router-for-me/CLIProxyAPI` 最新 release。
-2. 与 Docker Hub 当前镜像 tag 比较。
-3. upstream 更新时构建并推送 Docker 镜像。
-4. 备份 usage statistics 到 WebDAV。
-5. 触发 Render 部署。
-6. 发送 Telegram 通知。
-7. 清理旧 workflow runs。
-
-镜像 tag 与 upstream release tag 保持一致。
-
-### Management Release 发布
-
-Workflow：
-
-```text
-.github/workflows/release-mangement.yml
-```
-
-流程概览：
-
-1. 检查 upstream `router-for-me/Cli-Proxy-API-Management-Center` 最新 release。
-2. 与当前仓库最新 release 比较，比较时归一化 `-pro` 后缀。
-3. upstream 更新时 checkout 最新 release tag。
-4. 应用 `cliproxyapi-pro-management` 定制层。
-5. 执行 `npm ci` 和 `npm run build`。
-6. 将 `dist/index.html` 重命名为 `management.html`。
-7. 创建 GitHub Release 并上传 `management.html`。
-8. 清理旧 workflow runs。
-
-Management release tag 格式：
-
-```text
-<upstream-tag>-pro
-```
+Release 版本号以 upstream core 版本为准，并追加 `-pro` 后缀。
 
 示例：
 
 ```text
-v1.7.41-pro
+v7.1.18-pro
 ```
+
+流程概览：
+
+1. 检查 upstream `router-for-me/CLIProxyAPI` 最新 release。
+2. 计算 Pro release tag，例如 `v7.1.18-pro`。
+3. checkout upstream core 和 upstream management 最新 release。
+4. 应用 core patch，构建并推送 Docker 镜像。
+5. 使用 GoReleaser 构建 Pro 二进制资产。
+6. 应用 management 定制层，构建单文件 `management.html`。
+7. 创建或更新当前仓库的 GitHub Release，并上传二进制、`checksums.txt` 和 `management.html`。
+8. release notes 同时包含 core upstream 和 management upstream 的版本映射与 release notes。
+9. 执行 WebDAV usage 备份、Render 部署触发、Telegram 通知和 workflow run 清理。
+
+Docker 镜像 tag 使用 Pro release tag：
+
+```text
+latest
+v7.1.18-pro
+```
+
+Docker 构建参数中 `CLIPROXY_VERSION` 用于下载 upstream core tag，`CLIPROXY_BUILD_VERSION` 用于写入运行时版本号，因此镜像和二进制显示的版本是 `v7.1.18-pro`，但源码仍来自 upstream `v7.1.18`。
+
+二进制资产平台和压缩格式与 upstream CLIProxyAPI 保持一致，版本号使用 Pro release tag，因此资产名前缀保持为 `CLIProxyAPI`：
+
+```text
+CLIProxyAPI_7.1.18-pro_linux_amd64.tar.gz
+CLIProxyAPI_7.1.18-pro_linux_aarch64.tar.gz
+CLIProxyAPI_7.1.18-pro_darwin_amd64.tar.gz
+CLIProxyAPI_7.1.18-pro_darwin_aarch64.tar.gz
+CLIProxyAPI_7.1.18-pro_freebsd_amd64.tar.gz
+CLIProxyAPI_7.1.18-pro_freebsd_aarch64.tar.gz
+CLIProxyAPI_7.1.18-pro_windows_amd64.zip
+CLIProxyAPI_7.1.18-pro_windows_aarch64.zip
+checksums.txt
+management.html
+```
+
+归档内 README 使用本仓库的 `README.md` 和 `README_EN.md`。
+
+### Management 资产更新
+
+Workflow：
+
+```text
+.github/workflows/release-management.yml
+```
+
+该 workflow 不再创建独立 release。它只负责在 management upstream 更新时重建 `management.html`，并上传覆盖到当前仓库 latest release。
+
+流程概览：
+
+1. 检查 upstream `router-for-me/Cli-Proxy-API-Management-Center` 最新 release。
+2. 读取当前仓库 latest release notes 中记录的 management upstream 版本。
+3. 如果 management upstream 更新，或 latest release 缺少 `management.html`，则 checkout management upstream 最新 release。
+4. 应用 `cliproxyapi-pro-management` 定制层。
+5. 执行 `npm ci` 和 `npm run build`。
+6. 将 `dist/index.html` 重命名为 `management.html`。
+7. 上传覆盖当前 latest release 中的 `management.html`。
+8. 更新 release notes 中的 management 版本映射和 release notes。
+
+这样 `remote-management.panel-github-repository=https://github.com/ssfun/CLIProxyAPI-Pro` 仍然可以通过 GitHub `/releases/latest` 获取到最新 `management.html`。
 
 ## 本地构建
 
@@ -182,8 +212,9 @@ docker build -t cliproxyapi-pro ./cliproxyapi-pro-core
 
 ```bash
 docker build \
-  --build-arg CLIPROXY_VERSION=v6.10.1 \
-  -t cliproxyapi-pro:v6.10.1 \
+  --build-arg CLIPROXY_VERSION=v7.1.18 \
+  --build-arg CLIPROXY_BUILD_VERSION=v7.1.18-pro \
+  -t cliproxyapi-pro:v7.1.18-pro \
   ./cliproxyapi-pro-core
 ```
 
@@ -266,7 +297,7 @@ KOMARI_SERVER
 KOMARI_SECRET
 ```
 
-完整说明见 `cliproxyapi-pro-core/README_CN.md`。
+完整说明见 `cliproxyapi-pro-core/README.md`。
 
 ## 设计原则
 
@@ -299,4 +330,4 @@ KOMARI_SECRET
 - Core English README：`cliproxyapi-pro-core/README_EN.md`
 - Management 中文文档：`cliproxyapi-pro-management/README.md`
 - Management English README：`cliproxyapi-pro-management/README_EN.md`
-- English project overview：`README.md_EN`
+- English project overview：`README_EN.md`

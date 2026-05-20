@@ -289,6 +289,26 @@ type PriceDraft = {
   cache: string;
 };
 
+type MonitoringSettings = {
+  retentionDays: number;
+  webdav: {
+    enabled: boolean;
+    intervalMinutes: number;
+    url: string;
+    username: string;
+    password: string;
+  };
+};
+
+type MonitoringSettingsDraft = {
+  retentionDays: string;
+  webdavEnabled: boolean;
+  webdavIntervalMinutes: string;
+  webdavUrl: string;
+  webdavUsername: string;
+  webdavPassword: string;
+};
+
 type RealtimeLogRow = MonitoringEventRow & {
   requestCount: number;
   successRate: number;
@@ -309,7 +329,39 @@ type UsageImportResult = {
   quotaCacheRecords?: number;
   accountInspectionSchedule?: boolean;
   accountInspectionScheduleRecords?: number;
+  monitoringSettings?: boolean;
+  monitoringSettingsRecords?: number;
 };
+
+const createMonitoringSettingsDraft = (settings?: MonitoringSettings): MonitoringSettingsDraft => ({
+  retentionDays: String(settings?.retentionDays ?? 0),
+  webdavEnabled: settings?.webdav.enabled ?? false,
+  webdavIntervalMinutes: String(settings?.webdav.intervalMinutes ?? 1440),
+  webdavUrl: settings?.webdav.url ?? '',
+  webdavUsername: settings?.webdav.username ?? '',
+  webdavPassword: settings?.webdav.password ?? '',
+});
+
+const parseNonNegativeInteger = (value: string) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+};
+
+const parsePositiveInteger = (value: string, fallback: number) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const buildMonitoringSettingsFromDraft = (draft: MonitoringSettingsDraft): MonitoringSettings => ({
+  retentionDays: parseNonNegativeInteger(draft.retentionDays),
+  webdav: {
+    enabled: draft.webdavEnabled,
+    intervalMinutes: parsePositiveInteger(draft.webdavIntervalMinutes, 1440),
+    url: draft.webdavUrl.trim(),
+    username: draft.webdavUsername.trim(),
+    password: draft.webdavPassword,
+  },
+});
 
 
 const SuccessFailureValue = ({ success, failure }: { success: number; failure: number }) => (
@@ -2318,6 +2370,10 @@ export function MonitoringCenterPage() {
   const [selectedStatus, setSelectedStatus] = useState<StatusFilter>('all');
   const [expandedAccounts, setExpandedAccounts] = useState<Record<string, boolean>>({});
   const [isPriceModalOpen, setIsPriceModalOpen] = useState(false);
+  const [isMonitoringSettingsOpen, setIsMonitoringSettingsOpen] = useState(false);
+  const [isMonitoringSettingsLoading, setIsMonitoringSettingsLoading] = useState(false);
+  const [isMonitoringSettingsSaving, setIsMonitoringSettingsSaving] = useState(false);
+  const [monitoringSettingsDraft, setMonitoringSettingsDraft] = useState<MonitoringSettingsDraft>(() => createMonitoringSettingsDraft());
   const [priceModel, setPriceModel] = useState('');
   const [priceDraft, setPriceDraft] = useState<PriceDraft>(() => createPriceDraft());
   const [isImportingUsage, setIsImportingUsage] = useState(false);
@@ -2359,6 +2415,42 @@ export function MonitoringCenterPage() {
     await Promise.all([refreshUsage(), refreshMeta(false)]);
   }, [refreshUsage, refreshMeta]);
 
+  const loadMonitoringSettings = useCallback(async () => {
+    if (connectionStatus !== 'connected') {
+      showNotification(t('notification.connection_required'), 'warning');
+      return;
+    }
+    setIsMonitoringSettingsLoading(true);
+    try {
+      const response = await apiClient.get<{ settings: MonitoringSettings }>('/usage/settings');
+      setMonitoringSettingsDraft(createMonitoringSettingsDraft(response.settings));
+      setIsMonitoringSettingsOpen(true);
+    } catch (error) {
+      showNotification(error instanceof Error ? error.message : String(error || t('common.unknown_error')), 'error');
+    } finally {
+      setIsMonitoringSettingsLoading(false);
+    }
+  }, [connectionStatus, showNotification, t]);
+
+  const handleSaveMonitoringSettings = useCallback(async () => {
+    const settings = buildMonitoringSettingsFromDraft(monitoringSettingsDraft);
+    if (settings.webdav.enabled && !settings.webdav.url) {
+      showNotification(t('usage_stats.monitoring_settings_webdav_url_required'), 'warning');
+      return;
+    }
+    setIsMonitoringSettingsSaving(true);
+    try {
+      const response = await apiClient.put<{ settings: MonitoringSettings }>('/usage/settings', { settings });
+      setMonitoringSettingsDraft(createMonitoringSettingsDraft(response.settings));
+      setIsMonitoringSettingsOpen(false);
+      showNotification(t('usage_stats.monitoring_settings_saved'), 'success');
+      await refreshAll();
+    } catch (error) {
+      showNotification(error instanceof Error ? error.message : String(error || t('common.unknown_error')), 'error');
+    } finally {
+      setIsMonitoringSettingsSaving(false);
+    }
+  }, [monitoringSettingsDraft, refreshAll, showNotification, t]);
   const handleExportUsage = useCallback(async () => {
     if (connectionStatus !== 'connected') {
       showNotification(t('notification.connection_required'), 'warning');
@@ -2412,6 +2504,7 @@ export function MonitoringCenterPage() {
           (result.modelPriceRecords ?? 0) > 0 ? t('usage_stats.import_model_prices_restored', { count: result.modelPrices ?? 0 }) : '',
           (result.quotaCacheRecords ?? 0) > 0 ? t('usage_stats.import_quota_cache_restored', { count: result.quotaCache ?? 0 }) : '',
           result.accountInspectionSchedule ? t('usage_stats.import_account_inspection_schedule_restored') : '',
+          result.monitoringSettings ? t('usage_stats.import_monitoring_settings_restored') : '',
         ].filter(Boolean).join(' · ');
         showNotification(
           [
@@ -2867,6 +2960,14 @@ export function MonitoringCenterPage() {
               <button
                 type="button"
                 className={`${styles.quickLinkButton} ${styles.mastheadActionButton}`}
+                onClick={() => void loadMonitoringSettings()}
+                disabled={isMonitoringSettingsLoading}
+              >
+                {isMonitoringSettingsLoading ? t('common.loading') : t('usage_stats.monitoring_settings')}
+              </button>
+              <button
+                type="button"
+                className={`${styles.quickLinkButton} ${styles.mastheadActionButton}`}
                 onClick={() => void handleExportUsage()}
               >
                 {t('usage_stats.export')}
@@ -3174,6 +3275,98 @@ export function MonitoringCenterPage() {
         </div>
         </Card>
       </section>
+
+      <Modal
+        open={isMonitoringSettingsOpen}
+        onClose={() => setIsMonitoringSettingsOpen(false)}
+        title={t('usage_stats.monitoring_settings')}
+        width={760}
+        className={styles.monitorModal}
+      >
+        <div className={styles.monitoringSettingsEditor}>
+          <div className={styles.settingsSectionCard}>
+            <div className={styles.settingsSectionHeader}>
+              <strong>{t('usage_stats.monitoring_settings_retention_title')}</strong>
+              <span>{t('usage_stats.monitoring_settings_retention_desc')}</span>
+            </div>
+            <label className={styles.settingsField}>
+              <span>{t('usage_stats.monitoring_settings_retention_days')}</span>
+              <Input
+                type="number"
+                min="0"
+                step="1"
+                value={monitoringSettingsDraft.retentionDays}
+                onChange={(event) => setMonitoringSettingsDraft((previous) => ({ ...previous, retentionDays: event.target.value }))}
+                placeholder="0"
+              />
+              <small>{t('usage_stats.monitoring_settings_retention_hint')}</small>
+            </label>
+          </div>
+
+          <div className={styles.settingsSectionCard}>
+            <div className={styles.settingsSectionHeader}>
+              <strong>{t('usage_stats.monitoring_settings_webdav_title')}</strong>
+              <span>{t('usage_stats.monitoring_settings_webdav_desc')}</span>
+            </div>
+            <label className={styles.settingsCheckboxField}>
+              <input
+                type="checkbox"
+                checked={monitoringSettingsDraft.webdavEnabled}
+                onChange={(event) => setMonitoringSettingsDraft((previous) => ({ ...previous, webdavEnabled: event.target.checked }))}
+              />
+              <span>{t('usage_stats.monitoring_settings_webdav_enabled')}</span>
+            </label>
+            <div className={styles.settingsGrid}>
+              <label className={styles.settingsField}>
+                <span>{t('usage_stats.monitoring_settings_webdav_interval')}</span>
+                <Input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={monitoringSettingsDraft.webdavIntervalMinutes}
+                  onChange={(event) => setMonitoringSettingsDraft((previous) => ({ ...previous, webdavIntervalMinutes: event.target.value }))}
+                  placeholder="1440"
+                />
+              </label>
+              <label className={styles.settingsField}>
+                <span>{t('usage_stats.monitoring_settings_webdav_url')}</span>
+                <Input
+                  value={monitoringSettingsDraft.webdavUrl}
+                  onChange={(event) => setMonitoringSettingsDraft((previous) => ({ ...previous, webdavUrl: event.target.value }))}
+                  placeholder="https://example.com/dav/path"
+                />
+              </label>
+              <label className={styles.settingsField}>
+                <span>{t('usage_stats.monitoring_settings_webdav_username')}</span>
+                <Input
+                  value={monitoringSettingsDraft.webdavUsername}
+                  onChange={(event) => setMonitoringSettingsDraft((previous) => ({ ...previous, webdavUsername: event.target.value }))}
+                  autoComplete="username"
+                />
+              </label>
+              <label className={styles.settingsField}>
+                <span>{t('usage_stats.monitoring_settings_webdav_password')}</span>
+                <Input
+                  type="password"
+                  value={monitoringSettingsDraft.webdavPassword}
+                  onChange={(event) => setMonitoringSettingsDraft((previous) => ({ ...previous, webdavPassword: event.target.value }))}
+                  autoComplete="current-password"
+                />
+              </label>
+            </div>
+            <small className={styles.settingsHint}>{t('usage_stats.monitoring_settings_webdav_hint')}</small>
+          </div>
+
+          <div className={styles.priceActionsBar}>
+            <Button variant="secondary" size="sm" onClick={() => setIsMonitoringSettingsOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button variant="primary" size="sm" onClick={() => void handleSaveMonitoringSettings()} disabled={isMonitoringSettingsSaving}>
+              {isMonitoringSettingsSaving ? t('common.loading') : t('common.save')}
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         open={isPriceModalOpen}

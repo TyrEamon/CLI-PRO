@@ -50,6 +50,8 @@ The embedded service exposes these management routes:
 - `DELETE /v0/management/usage/quota-cache` — delete quota cache entries.
 - `GET /v0/management/usage/model-prices` — read model price settings.
 - `PUT /v0/management/usage/model-prices` — write model price settings.
+- `GET /v0/management/usage/settings` — read monitoring retention and WebDAV backup settings.
+- `PUT /v0/management/usage/settings` — write monitoring retention and WebDAV backup settings.
 
 ### JSONL usage backup and restore
 
@@ -59,9 +61,10 @@ The export contains usage events and may also include metadata records:
 
 - `model_prices` — persisted model price settings used by the management UI cost view.
 - `quota_cache` — SQLite-backed quota snapshots used by quota cards and account-scoped refresh.
+- `monitoring_settings` — monitoring retention and WebDAV backup settings.
 - `account_inspection_schedule` — persisted backend account-inspection schedule.
 
-`/usage/import` accepts the same JSONL format. It reads each line's `record_type` once, imports usage events, restores model prices, restores quota cache entries, and restores the account-inspection schedule when those metadata records are present. Older event-only JSONL files remain compatible.
+`/usage/import` accepts the same JSONL format. It reads each line's `record_type` once, imports usage events, restores model prices, restores quota cache entries, restores monitoring settings, and restores the account-inspection schedule when those metadata records are present. Older event-only JSONL files remain compatible.
 
 Example import response fields:
 
@@ -76,7 +79,9 @@ Example import response fields:
   "quotaCache": 8,
   "quotaCacheRecords": 1,
   "accountInspectionSchedule": true,
-  "accountInspectionScheduleRecords": 1
+  "accountInspectionScheduleRecords": 1,
+  "monitoringSettings": true,
+  "monitoringSettingsRecords": 1
 }
 ```
 
@@ -159,7 +164,7 @@ It then starts `CLIProxyAPI` and optionally restores the latest usage backup fro
 - `embeddedusage/` — embedded SQLite usage service and management routes.
 - `patches/apply_upstream_patches.py` — patches upstream source during Docker build.
 - `patches/account_inspection_scheduler.go` — backend account-inspection scheduler injected into upstream management handlers.
-- `.github/workflows/release-core.yml` — image publish, usage backup, Render deployment trigger, Telegram notification, and run cleanup.
+- `.github/workflows/release-core.yml` — image publish, Pro binary assets, `management.html` publish, usage backup, Render deployment trigger, Telegram notification, and run cleanup.
 
 ## Docker build
 
@@ -175,19 +180,23 @@ Build latest upstream release:
 docker build -t cliproxyapi-pro ./cliproxyapi-pro-core
 ```
 
-Build a specific upstream release:
+Build a specific upstream release while writing the Pro runtime version:
 
 ```bash
 docker build \
-  --build-arg CLIPROXY_VERSION=v6.10.1 \
-  -t cliproxyapi-pro:v6.10.1 \
+  --build-arg CLIPROXY_VERSION=v7.1.18 \
+  --build-arg CLIPROXY_BUILD_VERSION=v7.1.18-pro \
+  -t cliproxyapi-pro:v7.1.18-pro \
   ./cliproxyapi-pro-core
 ```
+
+`CLIPROXY_VERSION` selects the upstream source tag, while `CLIPROXY_BUILD_VERSION` sets the runtime version.
 
 Build args:
 
 - `CLIPROXY_REPO` — upstream repository, default `router-for-me/CLIProxyAPI`.
 - `CLIPROXY_VERSION` — upstream release tag. If empty, the Dockerfile resolves the latest release.
+- `CLIPROXY_BUILD_VERSION` — optional runtime version. If empty, it uses the upstream version resolved from `CLIPROXY_VERSION`.
 - `GITHUB_TOKEN` — optional token for GitHub API requests.
 
 ## Runtime environment variables
@@ -242,13 +251,17 @@ Workflow:
 
 The workflow:
 
-1. Checks the latest upstream CLIProxyAPI release.
-2. Compares it with the latest Docker Hub image tag.
-3. Builds and pushes a `linux/amd64` and `linux/arm64` Docker image when upstream is newer.
-4. Exports usage statistics from one or more running CPA instances to WebDAV.
-5. Triggers one or more Render deployments.
-6. Sends a Telegram notification.
-7. Deletes old workflow runs.
+1. Checks the latest upstream CLIProxyAPI release and computes the Pro release tag, for example `v7.1.18-pro`.
+2. Checks the latest upstream management release.
+3. Builds and pushes `linux/amd64` and `linux/arm64` Docker images tagged with `latest` and the Pro release tag.
+4. Builds Pro binary assets with GoReleaser using the same platform matrix and archive formats as upstream, with the `CLIProxyAPI` asset prefix.
+5. Applies the management customization layer and builds `management.html`.
+6. Creates or updates the current repository GitHub Release, then uploads binary assets, `checksums.txt`, and `management.html`.
+7. Writes core upstream and management upstream version mappings plus release notes into the GitHub Release notes.
+8. Exports usage statistics from one or more running CPA instances to WebDAV.
+9. Triggers one or more Render deployments.
+10. Sends a Telegram notification.
+11. Deletes old workflow runs.
 
 ### Required Docker secrets
 

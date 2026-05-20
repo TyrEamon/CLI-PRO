@@ -2,6 +2,7 @@ package embeddedusage
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -69,6 +70,12 @@ func RegisterGinRoutes(group *gin.RouterGroup) {
 		group.PUT("/model-prices", func(c *gin.Context) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "usage service is not available"})
 		})
+		group.GET("/settings", func(c *gin.Context) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "usage service is not available"})
+		})
+		group.PUT("/settings", func(c *gin.Context) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "usage service is not available"})
+		})
 		return
 	}
 	server.RegisterGinRoutes(group)
@@ -86,6 +93,8 @@ func (s *Server) RegisterGinRoutes(group *gin.RouterGroup) {
 	group.DELETE("/quota-cache", s.handleQuotaCacheDelete)
 	group.GET("/model-prices", s.handleModelPricesGet)
 	group.PUT("/model-prices", s.handleModelPricesPut)
+	group.GET("/settings", s.handleMonitoringSettingsGet)
+	group.PUT("/settings", s.handleMonitoringSettingsPut)
 }
 
 func parseQueryInt64(c *gin.Context, key string, fallback int64) int64 {
@@ -202,17 +211,15 @@ func (s *Server) handleUsageStream(c *gin.Context) {
 	}
 }
 
-func (s *Server) handleUsageExport(c *gin.Context) {
-	data, err := s.store.ExportJSONL(c.Request.Context())
+func (s *Server) exportJSONL(ctx context.Context) ([]byte, error) {
+	data, err := s.store.ExportJSONL(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return nil, err
 	}
 	if accountInspectionScheduleExporter != nil {
 		schedule, ok, err := accountInspectionScheduleExporter()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+			return nil, err
 		}
 		if ok {
 			line, err := json.Marshal(accountInspectionScheduleExportRecord{
@@ -222,12 +229,20 @@ func (s *Server) handleUsageExport(c *gin.Context) {
 				ExportedAt: time.Now().UnixMilli(),
 			})
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
+				return nil, err
 			}
 			data = append(data, line...)
 			data = append(data, '\n')
 		}
+	}
+	return data, nil
+}
+
+func (s *Server) handleUsageExport(c *gin.Context) {
+	data, err := s.exportJSONL(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
 	c.Header("Content-Type", "application/x-ndjson")
 	c.Header("Content-Disposition", `attachment; filename="usage-events.jsonl"`)
@@ -244,6 +259,8 @@ func (s *Server) handleUsageImport(c *gin.Context) {
 	quotaCacheRecords := 0
 	var accountInspectionSchedule json.RawMessage
 	accountInspectionScheduleRecords := 0
+	var monitoringSettings *MonitoringSettings
+	monitoringSettingsRecords := 0
 	failed := 0
 	for reader.Scan() {
 		line := strings.TrimSpace(reader.Text())
@@ -274,6 +291,15 @@ func (s *Server) handleUsageImport(c *gin.Context) {
 			}
 			modelPrices = prices
 			modelPriceRecords++
+			continue
+		case monitoringSettingsExportRecordType:
+			settings, err := parseMonitoringSettingsImportRecord(raw)
+			if err != nil {
+				failed++
+				continue
+			}
+			monitoringSettings = &settings
+			monitoringSettingsRecords++
 			continue
 		case quotaCacheExportRecordType:
 			entries, err := parseQuotaCacheImportRecord(raw)
@@ -315,6 +341,12 @@ func (s *Server) handleUsageImport(c *gin.Context) {
 			}
 		}
 	}
+	if monitoringSettings != nil {
+		if err := s.store.SetMonitoringSettings(c.Request.Context(), *monitoringSettings); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
 	if accountInspectionSchedule != nil && accountInspectionScheduleImporter != nil {
 		if err := accountInspectionScheduleImporter(accountInspectionSchedule); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -332,6 +364,8 @@ func (s *Server) handleUsageImport(c *gin.Context) {
 		"quotaCacheRecords":                quotaCacheRecords,
 		"accountInspectionSchedule":        accountInspectionSchedule != nil,
 		"accountInspectionScheduleRecords": accountInspectionScheduleRecords,
+		"monitoringSettings":               monitoringSettings != nil,
+		"monitoringSettingsRecords":        monitoringSettingsRecords,
 	})
 }
 
@@ -362,6 +396,14 @@ func parseQuotaCacheImportRecord(raw []byte) ([]QuotaCacheEntry, error) {
 		return nil, err
 	}
 	return record.Entries, nil
+}
+
+func parseMonitoringSettingsImportRecord(raw []byte) (MonitoringSettings, error) {
+	var record monitoringSettingsExportRecord
+	if err := json.Unmarshal(raw, &record); err != nil {
+		return MonitoringSettings{}, err
+	}
+	return normalizeMonitoringSettings(record.Settings), nil
 }
 
 func parseModelPricesImportRecord(raw []byte) (map[string]ModelPrice, error) {
@@ -471,4 +513,37 @@ func (s *Server) handleModelPricesPut(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (s *Server) handleMonitoringSettingsGet(c *gin.Context) {
+	settings, err := s.store.GetMonitoringSettings(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"settings": settings})
+}
+
+func (s *Server) handleMonitoringSettingsPut(c *gin.Context) {
+	var payload struct {
+		Settings MonitoringSettings `json:"settings"`
+	}
+	if err := json.NewDecoder(c.Request.Body).Decode(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	settings := normalizeMonitoringSettings(payload.Settings)
+	if settings.WebDAV.Enabled && strings.TrimSpace(settings.WebDAV.URL) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "webdav url is required"})
+		return
+	}
+	if err := s.store.SetMonitoringSettings(c.Request.Context(), settings); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if _, err := s.store.ApplyRetention(c.Request.Context(), time.Now()); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"settings": settings})
 }

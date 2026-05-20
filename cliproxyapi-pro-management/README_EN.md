@@ -70,7 +70,7 @@ Adds a top-level account inspection route:
 /account-inspection
 ```
 
-The page controls and displays backend-run inspections. The browser does not execute probes directly. The backend can inspect:
+The page controls and displays backend-run inspections. The browser does not execute probes directly. The auth files page also shows inspection-written `last_error` health messages when no explicit status message exists. The backend can inspect:
 
 - Antigravity
 - Claude
@@ -88,6 +88,7 @@ Features include:
 - logs and live status from the backend WebSocket/WSS stream
 - suggested actions: keep, delete, disable, enable
 - manual execution for a single planned action or all planned actions through the backend
+- business-result toast messages for token refresh and single-account recheck, such as refresh success/failure, account errors, quota exhaustion, or healthy state
 - optional backend auto-execution policies for quota-limit disable, quota-recovery enable, and account-error disable/delete
 - quota snapshot refresh from backend inspection results
 
@@ -177,26 +178,25 @@ npm --prefix /tmp/cpa-management-check run build
 Workflow:
 
 ```text
-.github/workflows/release-mangement.yml
+.github/workflows/release-management.yml
 ```
+
+This workflow no longer creates a separate management release. It rebuilds and clobbers `management.html` on the current repository latest release when the management upstream changes, when the latest release is missing `management.html`, or when the workflow is triggered manually.
 
 The workflow:
 
-1. Compares this repository's latest release with upstream `router-for-me/Cli-Proxy-API-Management-Center`.
-2. Normalizes this repository's `-pro` suffix for version comparison.
-3. Checks out the latest upstream release when upstream is newer.
-4. Applies this customization layer from `cliproxyapi-pro-management/apply.sh`.
-5. Runs `npm ci` and `npm run build`.
-6. Renames `dist/index.html` to `management.html`.
-7. Publishes `management.html` as a GitHub Release asset.
-8. Uses the upstream tag plus `-pro` as the release tag.
-9. Deletes old workflow runs.
+1. Checks the current repository latest release.
+2. Checks the latest upstream `router-for-me/Cli-Proxy-API-Management-Center` release.
+3. Reads the management upstream version recorded in the latest release notes.
+4. If upstream is newer, the latest release has no `management.html`, or the workflow was triggered manually, checks out the latest upstream release tag.
+5. Applies this customization layer from `cliproxyapi-pro-management/apply.sh`.
+6. Runs `npm ci` and `npm run build`.
+7. Renames `dist/index.html` to `management.html`.
+8. Uploads and clobbers `management.html` on the current latest release.
+9. Updates the management version mapping and upstream release notes in the release notes.
+10. Deletes old workflow runs.
 
-Example release tag:
-
-```text
-v1.7.41-pro
-```
+This keeps `remote-management.panel-github-repository=https://github.com/ssfun/CLIProxyAPI-Pro` able to fetch the latest `management.html` through GitHub `/releases/latest`.
 
 ## Backend expectations
 
@@ -210,6 +210,7 @@ These frontend customizations expect the customized `cliproxyapi-pro-core` backe
 - `/v0/management/usage/import`
 - `/v0/management/usage/quota-cache`
 - `/v0/management/usage/model-prices`
+- `/v0/management/usage/settings`
 - `/v0/management/account-inspection/schedule`
 - `/v0/management/account-inspection/status`
 - `/v0/management/account-inspection/logs`

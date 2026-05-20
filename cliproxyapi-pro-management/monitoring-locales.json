@@ -696,7 +696,23 @@
       "request_events_limit_hint": "Showing {{shown}} of {{total}} events to keep rendering responsive.",
       "input_tokens": "Input Tokens",
       "output_tokens": "Output Tokens",
-      "last_updated": "Updated"
+      "last_updated": "Updated",
+      "monitoring_settings": "Monitoring Settings",
+      "monitoring_settings_saved": "Monitoring settings saved",
+      "monitoring_settings_retention_title": "Log Retention",
+      "monitoring_settings_retention_desc": "Control how long request monitoring logs are kept in the usage database.",
+      "monitoring_settings_retention_days": "Retention days",
+      "monitoring_settings_retention_hint": "Use 0 to keep all monitoring logs and disable automatic cleanup.",
+      "monitoring_settings_webdav_title": "WebDAV Backup",
+      "monitoring_settings_webdav_desc": "Periodically export usage data and upload the NDJSON backup to WebDAV.",
+      "monitoring_settings_webdav_enabled": "Enable WebDAV backup",
+      "monitoring_settings_webdav_interval": "Backup interval (minutes)",
+      "monitoring_settings_webdav_url": "WebDAV directory URL",
+      "monitoring_settings_webdav_username": "Username",
+      "monitoring_settings_webdav_password": "Password",
+      "monitoring_settings_webdav_hint": "Backups use the same data shape as Export, including usage events and monitoring metadata.",
+      "monitoring_settings_webdav_url_required": "WebDAV URL is required when backup is enabled",
+      "import_monitoring_settings_restored": "Monitoring settings restored"
     }
   },
   "ru.json": {
@@ -1396,7 +1412,23 @@
       "request_events_limit_hint": "Показано {{shown}} из {{total}} событий для стабильной производительности.",
       "input_tokens": "Входные токены",
       "output_tokens": "Выходные токены",
-      "last_updated": "Обновлено"
+      "last_updated": "Обновлено",
+      "monitoring_settings": "Monitoring Settings",
+      "monitoring_settings_saved": "Monitoring settings saved",
+      "monitoring_settings_retention_title": "Log Retention",
+      "monitoring_settings_retention_desc": "Control how long request monitoring logs are kept in the usage database.",
+      "monitoring_settings_retention_days": "Retention days",
+      "monitoring_settings_retention_hint": "Use 0 to keep all monitoring logs and disable automatic cleanup.",
+      "monitoring_settings_webdav_title": "WebDAV Backup",
+      "monitoring_settings_webdav_desc": "Periodically export usage data and upload the NDJSON backup to WebDAV.",
+      "monitoring_settings_webdav_enabled": "Enable WebDAV backup",
+      "monitoring_settings_webdav_interval": "Backup interval (minutes)",
+      "monitoring_settings_webdav_url": "WebDAV directory URL",
+      "monitoring_settings_webdav_username": "Username",
+      "monitoring_settings_webdav_password": "Password",
+      "monitoring_settings_webdav_hint": "Backups use the same data shape as Export, including usage events and monitoring metadata.",
+      "monitoring_settings_webdav_url_required": "WebDAV URL is required when backup is enabled",
+      "import_monitoring_settings_restored": "Monitoring settings restored"
     }
   },
   "zh-CN.json": {
@@ -2096,7 +2128,23 @@
       "request_events_limit_hint": "为保证渲染性能，仅展示 {{shown}} / {{total}} 条事件。",
       "input_tokens": "输入 Tokens",
       "output_tokens": "输出 Tokens",
-      "last_updated": "更新于"
+      "last_updated": "更新于",
+      "monitoring_settings": "监控设置",
+      "monitoring_settings_saved": "监控设置已保存",
+      "monitoring_settings_retention_title": "日志保留",
+      "monitoring_settings_retention_desc": "控制请求监控日志在 usage 数据库中的保留时长。",
+      "monitoring_settings_retention_days": "保留天数",
+      "monitoring_settings_retention_hint": "设为 0 表示保留全部监控日志，不自动清理。",
+      "monitoring_settings_webdav_title": "WebDAV 备份",
+      "monitoring_settings_webdav_desc": "定期通过导出数据格式生成 NDJSON 备份并上传到 WebDAV。",
+      "monitoring_settings_webdav_enabled": "启用 WebDAV 备份",
+      "monitoring_settings_webdav_interval": "备份间隔（分钟）",
+      "monitoring_settings_webdav_url": "WebDAV 目录 URL",
+      "monitoring_settings_webdav_username": "用户名",
+      "monitoring_settings_webdav_password": "密码",
+      "monitoring_settings_webdav_hint": "备份内容与导出数据一致，包含 usage events 和监控元数据。",
+      "monitoring_settings_webdav_url_required": "启用备份时必须填写 WebDAV URL",
+      "import_monitoring_settings_restored": "监控设置已恢复"
     }
   },
   "zh-TW.json": {
@@ -2796,7 +2844,23 @@
       "request_events_limit_hint": "為確保渲染效能，僅展示 {{shown}} / {{total}} 條事件。",
       "input_tokens": "輸入 Tokens",
       "output_tokens": "輸出 Tokens",
-      "last_updated": "更新於"
+      "last_updated": "更新於",
+      "monitoring_settings": "監控設定",
+      "monitoring_settings_saved": "監控設定已儲存",
+      "monitoring_settings_retention_title": "日誌保留",
+      "monitoring_settings_retention_desc": "控制請求監控日誌在 usage 資料庫中的保留時間。",
+      "monitoring_settings_retention_days": "保留天數",
+      "monitoring_settings_retention_hint": "設為 0 表示保留全部監控日誌，不自動清理。",
+      "monitoring_settings_webdav_title": "WebDAV 備份",
+      "monitoring_settings_webdav_desc": "定期透過匯出資料格式產生 NDJSON 備份並上傳到 WebDAV。",
+      "monitoring_settings_webdav_enabled": "啟用 WebDAV 備份",
+      "monitoring_settings_webdav_interval": "備份間隔（分鐘）",
+      "monitoring_settings_webdav_url": "WebDAV 目錄 URL",
+      "monitoring_settings_webdav_username": "使用者名稱",
+      "monitoring_settings_webdav_password": "密碼",
+      "monitoring_settings_webdav_hint": "備份內容與匯出資料一致，包含 usage events 和監控中繼資料。",
+      "monitoring_settings_webdav_url_required": "啟用備份時必須填寫 WebDAV URL",
+      "import_monitoring_settings_restored": "監控設定已還原"
     }
   }
 }

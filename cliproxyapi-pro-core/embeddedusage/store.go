@@ -34,6 +34,19 @@ type QuotaCacheStats struct {
 	UpdatedAt    int64 `json:"updatedAt"`
 }
 
+type MonitoringSettings struct {
+	RetentionDays int                          `json:"retentionDays"`
+	WebDAV        MonitoringWebDAVBackupConfig `json:"webdav"`
+}
+
+type MonitoringWebDAVBackupConfig struct {
+	Enabled         bool   `json:"enabled"`
+	IntervalMinutes int    `json:"intervalMinutes"`
+	URL             string `json:"url"`
+	Username        string `json:"username"`
+	Password        string `json:"password"`
+}
+
 type ModelPrice struct {
 	Prompt     float64 `json:"prompt"`
 	Completion float64 `json:"completion"`
@@ -47,6 +60,13 @@ type modelPricesExportRecord struct {
 	ExportedAt int64                 `json:"exported_at_ms"`
 }
 
+type monitoringSettingsExportRecord struct {
+	RecordType string             `json:"record_type"`
+	Version    int                `json:"version"`
+	Settings   MonitoringSettings `json:"settings"`
+	ExportedAt int64              `json:"exported_at_ms"`
+}
+
 type quotaCacheExportRecord struct {
 	RecordType string            `json:"record_type"`
 	Version    int               `json:"version"`
@@ -56,6 +76,7 @@ type quotaCacheExportRecord struct {
 
 const modelPricesExportRecordType = "model_prices"
 const quotaCacheExportRecordType = "quota_cache"
+const monitoringSettingsExportRecordType = "monitoring_settings"
 
 type Store struct {
 	db           *sql.DB
@@ -147,6 +168,11 @@ func (s *Store) init() error {
 				updated_at_ms integer not null
 			)`,
 		`create index if not exists idx_model_prices_updated_at on model_prices(updated_at_ms)`,
+		`create table if not exists monitoring_settings (
+			id integer primary key check (id = 1),
+			settings_json text not null,
+			updated_at_ms integer not null
+		)`,
 	}
 	for _, statement := range statements {
 		if _, err := s.db.Exec(statement); err != nil {
@@ -332,8 +358,23 @@ func (s *Store) ExportJSONL(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	settings, err := s.GetMonitoringSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	output := make([]byte, 0)
+	line, err := json.Marshal(monitoringSettingsExportRecord{
+		RecordType: monitoringSettingsExportRecordType,
+		Version:    1,
+		Settings:   settings,
+		ExportedAt: time.Now().UnixMilli(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	output = append(output, line...)
+	output = append(output, '\n')
 	if len(prices) > 0 {
 		line, err := json.Marshal(modelPricesExportRecord{
 			RecordType: modelPricesExportRecordType,
@@ -371,6 +412,76 @@ func (s *Store) ExportJSONL(ctx context.Context) ([]byte, error) {
 		output = append(output, '\n')
 	}
 	return output, nil
+}
+
+func defaultMonitoringSettings() MonitoringSettings {
+	return MonitoringSettings{
+		RetentionDays: 0,
+		WebDAV: MonitoringWebDAVBackupConfig{
+			Enabled:         false,
+			IntervalMinutes: 1440,
+		},
+	}
+}
+
+func normalizeMonitoringSettings(settings MonitoringSettings) MonitoringSettings {
+	if settings.RetentionDays < 0 {
+		settings.RetentionDays = 0
+	}
+	if settings.WebDAV.IntervalMinutes <= 0 {
+		settings.WebDAV.IntervalMinutes = 1440
+	}
+	settings.WebDAV.URL = strings.TrimSpace(settings.WebDAV.URL)
+	settings.WebDAV.Username = strings.TrimSpace(settings.WebDAV.Username)
+	return settings
+}
+
+func (s *Store) GetMonitoringSettings(ctx context.Context) (MonitoringSettings, error) {
+	settings := defaultMonitoringSettings()
+	var raw string
+	if err := s.db.QueryRowContext(ctx, `select settings_json from monitoring_settings where id = 1`).Scan(&raw); err != nil {
+		if err == sql.ErrNoRows {
+			return settings, nil
+		}
+		return settings, err
+	}
+	if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+		return defaultMonitoringSettings(), err
+	}
+	return normalizeMonitoringSettings(settings), nil
+}
+
+func (s *Store) SetMonitoringSettings(ctx context.Context, settings MonitoringSettings) error {
+	settings = normalizeMonitoringSettings(settings)
+	raw, err := json.Marshal(settings)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `insert into monitoring_settings(id, settings_json, updated_at_ms) values(1, ?, ?)
+		on conflict(id) do update set settings_json = excluded.settings_json, updated_at_ms = excluded.updated_at_ms`, string(raw), time.Now().UnixMilli())
+	return err
+}
+
+func (s *Store) DeleteEventsBefore(ctx context.Context, beforeMs int64) (int64, error) {
+	if beforeMs <= 0 {
+		return 0, nil
+	}
+	result, err := s.db.ExecContext(ctx, `delete from usage_events where timestamp_ms < ?`, beforeMs)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+func (s *Store) ApplyRetention(ctx context.Context, now time.Time) (int64, error) {
+	settings, err := s.GetMonitoringSettings(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if settings.RetentionDays <= 0 {
+		return 0, nil
+	}
+	return s.DeleteEventsBefore(ctx, now.AddDate(0, 0, -settings.RetentionDays).UnixMilli())
 }
 
 func (s *Store) GetQuotaCache(ctx context.Context, provider string, fileName string) ([]QuotaCacheEntry, error) {

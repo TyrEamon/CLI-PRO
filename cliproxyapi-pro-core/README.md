@@ -50,6 +50,8 @@ internal/embeddedusage
 - `DELETE /v0/management/usage/quota-cache` — 删除配额缓存。
 - `GET /v0/management/usage/model-prices` — 读取模型价格设置。
 - `PUT /v0/management/usage/model-prices` — 写入模型价格设置。
+- `GET /v0/management/usage/settings` — 读取监控日志保留和 WebDAV 备份设置。
+- `PUT /v0/management/usage/settings` — 写入监控日志保留和 WebDAV 备份设置。
 
 ### JSONL usage 备份与恢复
 
@@ -59,9 +61,10 @@ internal/embeddedusage
 
 - `model_prices` — 管理页面成本视图使用的模型价格设置。
 - `quota_cache` — 配额卡片和账号级刷新使用的 SQLite-backed quota snapshots。
+- `monitoring_settings` — 监控日志保留时间和 WebDAV 备份配置。
 - `account_inspection_schedule` — 后端账号巡检调度设置。
 
-`/usage/import` 接受同样的 JSONL 格式。导入时会对每行只读取一次 `record_type`，导入 usage events，恢复模型价格、quota cache entries，并在存在账号巡检调度记录时恢复调度设置。旧的 event-only JSONL 文件仍兼容。
+`/usage/import` 接受同样的 JSONL 格式。导入时会对每行只读取一次 `record_type`，导入 usage events，恢复模型价格、quota cache entries、监控设置，并在存在账号巡检调度记录时恢复调度设置。旧的 event-only JSONL 文件仍兼容。
 
 导入响应示例字段：
 
@@ -76,7 +79,9 @@ internal/embeddedusage
   "quotaCache": 8,
   "quotaCacheRecords": 1,
   "accountInspectionSchedule": true,
-  "accountInspectionScheduleRecords": 1
+  "accountInspectionScheduleRecords": 1,
+  "monitoringSettings": true,
+  "monitoringSettingsRecords": 1
 }
 ```
 
@@ -159,7 +164,7 @@ https://github.com/ssfun/CLIProxyAPI-Pro
 - `embeddedusage/` — 内嵌 SQLite usage service 和 management routes。
 - `patches/apply_upstream_patches.py` — Docker build 阶段 patch upstream 源码。
 - `patches/account_inspection_scheduler.go` — 注入 upstream management handlers 的后端账号巡检调度器。
-- `.github/workflows/release-core.yml` — 镜像发布、usage 备份、Render 部署触发、Telegram 通知和 workflow 清理。
+- `.github/workflows/release-core.yml` — 镜像发布、Pro 二进制资产、management.html 发布、usage 备份、Render 部署触发、Telegram 通知和 workflow 清理。
 
 ## Docker 构建
 
@@ -175,19 +180,23 @@ docker pull sfun/cliproxyapi-pro:latest
 docker build -t cliproxyapi-pro ./cliproxyapi-pro-core
 ```
 
-构建指定 upstream release：
+构建指定 upstream release，并写入 Pro runtime 版本：
 
 ```bash
 docker build \
-  --build-arg CLIPROXY_VERSION=v6.10.1 \
-  -t cliproxyapi-pro:v6.10.1 \
+  --build-arg CLIPROXY_VERSION=v7.1.18 \
+  --build-arg CLIPROXY_BUILD_VERSION=v7.1.18-pro \
+  -t cliproxyapi-pro:v7.1.18-pro \
   ./cliproxyapi-pro-core
 ```
+
+`CLIPROXY_VERSION` 用于下载 upstream 源码，`CLIPROXY_BUILD_VERSION` 用于写入运行时版本号。
 
 可用 build args：
 
 - `CLIPROXY_REPO` — upstream 仓库，默认 `router-for-me/CLIProxyAPI`。
 - `CLIPROXY_VERSION` — upstream release tag。为空时 Dockerfile 自动解析 latest release。
+- `CLIPROXY_BUILD_VERSION` — 可选 runtime 版本号。为空时使用 `CLIPROXY_VERSION` 解析到的 upstream 版本。
 - `GITHUB_TOKEN` — 可选 GitHub API token。
 
 ## 运行时环境变量
@@ -242,13 +251,17 @@ Workflow：
 
 流程：
 
-1. 检查 upstream CLIProxyAPI 最新 release。
-2. 与 Docker Hub 当前镜像 tag 比较。
-3. upstream 更新时构建并推送 `linux/amd64` 和 `linux/arm64` Docker 镜像。
-4. 从一个或多个正在运行的 CPA 实例导出 usage statistics 到 WebDAV。
-5. 触发一个或多个 Render 部署。
-6. 发送 Telegram 通知。
-7. 清理旧 workflow runs。
+1. 检查 upstream CLIProxyAPI 最新 release，并计算当前 Pro release tag，例如 `v7.1.18-pro`。
+2. 检查 upstream management 最新 release。
+3. 构建并推送 `linux/amd64` 和 `linux/arm64` Docker 镜像，tag 包括 `latest` 和 Pro release tag。
+4. 使用 GoReleaser 构建与 upstream 平台和压缩格式一致的 Pro 二进制资产，资产名前缀保持为 `CLIProxyAPI`。
+5. 应用 management 定制层并构建 `management.html`。
+6. 创建或更新当前仓库 GitHub Release，上传二进制资产、`checksums.txt` 和 `management.html`。
+7. Release notes 写入 core upstream 与 management upstream 的版本映射和 release notes。
+8. 从一个或多个正在运行的 CPA 实例导出 usage statistics 到 WebDAV。
+9. 触发一个或多个 Render 部署。
+10. 发送 Telegram 通知。
+11. 清理旧 workflow runs。
 
 ### Docker 发布 secrets
 
