@@ -324,6 +324,7 @@ Special thanks to:
 - [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) — the upstream backend project this core customization layer builds on.
 - [router-for-me/Cli-Proxy-API-Management-Center](https://github.com/router-for-me/Cli-Proxy-API-Management-Center) — the upstream management UI this frontend customization layer builds on.
 - [seakee/CPA-Manager](https://github.com/seakee/CPA-Manager) — an important CLIProxyAPI management and monitoring project that inspired the Pro usage, monitoring, and account-inspection direction.
+- Thanks to the [Linux.do](https://linux.do/) community for project promotion and feedback.
 
 ## Documentation
 
