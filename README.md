@@ -349,6 +349,7 @@ KOMARI_SECRET
 - [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) — 本项目 core 定制层所基于的 upstream 后端项目。
 - [router-for-me/Cli-Proxy-API-Management-Center](https://github.com/router-for-me/Cli-Proxy-API-Management-Center) — 本项目 management 定制层所基于的 upstream 管理 UI 项目。
 - [seakee/CPA-Manager](https://github.com/seakee/CPA-Manager) — 重要的 CLIProxyAPI 管理与监控项目，对 Pro usage、monitoring 和账号巡检方向提供了参考。
+- 感谢 [Linux.do](https://linux.do/) 社区对项目推广与反馈的支持。
 
 ## 参考文档
 
