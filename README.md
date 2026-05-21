@@ -7,6 +7,14 @@ CLIProxyAPI Pro 是对两个 upstream 项目的最小化定制层集合：
 
 本项目不维护 upstream 的完整 fork，而是维护可重复应用的 patch、overlay 和构建流程。发布时会拉取 upstream 最新 release，应用本项目定制层，再生成 Pro 版本产物。
 
+## 核心特色
+
+- 持久化保存请求数据，支持导入、导出、webdav 备份
+- 账号巡检支持 Codex、Claude、Antigravity、Gemini CLI、Kimi、xAI
+- 账号巡检结果（配额和账号异常状态）支持持久化到配额管理和认证文件
+- 账号巡检支持自动化启用、禁用、删除、主动刷新令牌
+- 账号巡检针对 Antigravity 软封禁（有配额，但是无法请求）提供深度检测
+
 ## 项目结构
 
 ```text
@@ -78,6 +86,23 @@ CLIProxyAPI Pro 是对两个 upstream 项目的最小化定制层集合：
 
 - `cliproxyapi-pro-management/README.md`
 - `cliproxyapi-pro-management/README_EN.md`
+
+## 界面预览
+
+<div align="center">
+
+### 请求监控
+![请求监控](assets/01.jpeg)
+
+### 请求监控
+![请求监控全览](assets/02.jpeg)
+
+### 账号巡检
+![账号巡检全览](assets/03.jpeg)
+
+</div>
+
+更多预览请查看 assets 目录。
 
 ## 前后端关系
 
@@ -257,8 +282,9 @@ core 镜像默认使用：
 - 账号巡检调度文件：`account-inspection-schedule.json`
 - quota cache
 - model prices
+- monitoring settings
 
-Usage 导入导出会使用 NDJSON 元数据记录保存模型价格、quota cache 和账号巡检调度，因此 WebDAV 备份恢复可以随 usage events 一起恢复监控相关状态。
+Usage 导入导出会使用 NDJSON 元数据记录保存模型价格、quota cache、监控设置和账号巡检调度，因此 WebDAV 备份恢复可以随 usage events 一起恢复监控相关状态。监控日志保留会在每天服务器本地时间 02:00 自动清理，保存设置时也会立即清理一次；WebDAV 备份可单独设置保留天数，成功备份后会删除过期的 `usage-export-*.jsonl` 文件。
 
 建议在生产环境中为该目录配置持久化 volume。
 

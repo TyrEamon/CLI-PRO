@@ -61,7 +61,7 @@ The export contains usage events and may also include metadata records:
 
 - `model_prices` — persisted model price settings used by the management UI cost view.
 - `quota_cache` — SQLite-backed quota snapshots used by quota cards and account-scoped refresh.
-- `monitoring_settings` — monitoring retention and WebDAV backup settings.
+- `monitoring_settings` — monitoring retention, WebDAV backup settings, and WebDAV backup retention days.
 - `account_inspection_schedule` — persisted backend account-inspection schedule.
 
 `/usage/import` accepts the same JSONL format. It reads each line's `record_type` once, imports usage events, restores model prices, restores quota cache entries, restores monitoring settings, and restores the account-inspection schedule when those metadata records are present. Older event-only JSONL files remain compatible.

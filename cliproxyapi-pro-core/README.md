@@ -61,7 +61,7 @@ internal/embeddedusage
 
 - `model_prices` — 管理页面成本视图使用的模型价格设置。
 - `quota_cache` — 配额卡片和账号级刷新使用的 SQLite-backed quota snapshots。
-- `monitoring_settings` — 监控日志保留时间和 WebDAV 备份配置。
+- `monitoring_settings` — 监控日志保留时间、WebDAV 备份配置和 WebDAV 备份保留天数。
 - `account_inspection_schedule` — 后端账号巡检调度设置。
 
 `/usage/import` 接受同样的 JSONL 格式。导入时会对每行只读取一次 `record_type`，导入 usage events，恢复模型价格、quota cache entries、监控设置，并在存在账号巡检调度记录时恢复调度设置。旧的 event-only JSONL 文件仍兼容。

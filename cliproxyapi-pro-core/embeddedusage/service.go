@@ -3,8 +3,10 @@ package embeddedusage
 import (
 	"bytes"
 	"context"
+	"encoding/xml"
 	"fmt"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 
@@ -99,20 +101,26 @@ func (s *Service) collect(ctx context.Context) {
 }
 
 func (s *Service) maintain(ctx context.Context) {
-	ticker := time.NewTicker(time.Hour)
-	defer ticker.Stop()
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Until(nextMonitoringRetentionRun(time.Now()))):
+		}
 		if deleted, err := s.store.ApplyRetention(ctx, time.Now()); err != nil {
 			log.WithError(err).Warn("failed to apply embedded usage retention")
 		} else if deleted > 0 {
 			log.Infof("embedded usage retention deleted %d events", deleted)
 		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
 	}
+}
+
+func nextMonitoringRetentionRun(now time.Time) time.Time {
+	next := time.Date(now.Year(), now.Month(), now.Day(), 2, 0, 0, 0, now.Location())
+	if !next.After(now) {
+		next = next.AddDate(0, 0, 1)
+	}
+	return next
 }
 
 func (s *Service) runWebDAVBackups(ctx context.Context) {
@@ -157,15 +165,14 @@ func (s *Service) backupToWebDAV(ctx context.Context, cfg MonitoringWebDAVBackup
 	if err != nil {
 		return err
 	}
-	url := strings.TrimRight(cfg.URL, "/") + fmt.Sprintf("/usage-export-%s.jsonl", time.Now().UTC().Format("20060102_150405"))
+	baseURL := strings.TrimRight(cfg.URL, "/")
+	url := baseURL + fmt.Sprintf("/usage-export-%s.jsonl", time.Now().UTC().Format("20060102_150405"))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/x-ndjson")
-	if cfg.Username != "" || cfg.Password != "" {
-		req.SetBasicAuth(cfg.Username, cfg.Password)
-	}
+	setWebDAVAuth(req, cfg)
 	response, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
@@ -175,5 +182,84 @@ func (s *Service) backupToWebDAV(ctx context.Context, cfg MonitoringWebDAVBackup
 		return fmt.Errorf("webdav upload failed with status %d", response.StatusCode)
 	}
 	log.Infof("embedded usage backup uploaded to WebDAV: %s", url)
+	if cfg.RetentionDays > 0 {
+		if deleted, err := pruneWebDAVBackups(ctx, baseURL, cfg, time.Now().UTC()); err != nil {
+			log.WithError(err).Warn("failed to prune embedded usage WebDAV backups")
+		} else if deleted > 0 {
+			log.Infof("embedded usage WebDAV retention deleted %d backups", deleted)
+		}
+	}
 	return nil
+}
+
+func setWebDAVAuth(req *http.Request, cfg MonitoringWebDAVBackupConfig) {
+	if cfg.Username != "" || cfg.Password != "" {
+		req.SetBasicAuth(cfg.Username, cfg.Password)
+	}
+}
+
+type webDAVMultistatus struct {
+	Responses []webDAVResponse `xml:"response"`
+}
+
+type webDAVResponse struct {
+	Href     string         `xml:"href"`
+	Propstat webDAVPropstat `xml:"propstat"`
+}
+
+type webDAVPropstat struct {
+	Prop webDAVProp `xml:"prop"`
+}
+
+type webDAVProp struct {
+	LastModified string `xml:"getlastmodified"`
+}
+
+func pruneWebDAVBackups(ctx context.Context, baseURL string, cfg MonitoringWebDAVBackupConfig, now time.Time) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, "PROPFIND", baseURL+"/", nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Depth", "1")
+	setWebDAVAuth(req, cfg)
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return 0, fmt.Errorf("webdav propfind failed with status %d", response.StatusCode)
+	}
+	var listing webDAVMultistatus
+	if err := xml.NewDecoder(response.Body).Decode(&listing); err != nil {
+		return 0, err
+	}
+
+	cutoff := now.AddDate(0, 0, -cfg.RetentionDays)
+	deleted := 0
+	for _, item := range listing.Responses {
+		fileName := path.Base(strings.TrimRight(item.Href, "/"))
+		if !strings.HasPrefix(fileName, "usage-export-") || !strings.HasSuffix(fileName, ".jsonl") {
+			continue
+		}
+		modifiedAt, err := http.ParseTime(strings.TrimSpace(item.Propstat.Prop.LastModified))
+		if err != nil || !modifiedAt.Before(cutoff) {
+			continue
+		}
+		deleteReq, err := http.NewRequestWithContext(ctx, http.MethodDelete, baseURL+"/"+fileName, nil)
+		if err != nil {
+			return deleted, err
+		}
+		setWebDAVAuth(deleteReq, cfg)
+		deleteResponse, err := http.DefaultClient.Do(deleteReq)
+		if err != nil {
+			return deleted, err
+		}
+		deleteResponse.Body.Close()
+		if deleteResponse.StatusCode < 200 || deleteResponse.StatusCode >= 300 {
+			return deleted, fmt.Errorf("webdav delete failed for %s with status %d", fileName, deleteResponse.StatusCode)
+		}
+		deleted++
+	}
+	return deleted, nil
 }

@@ -74,15 +74,23 @@
 
 .titleActions {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
   padding: 4px;
   border: 1px solid color-mix(in srgb, var(--monitor-line) 72%, transparent);
   border-radius: 14px;
   background: color-mix(in srgb, var(--monitor-surface) 74%, transparent);
   box-shadow: 0 12px 28px -26px rgba(15, 23, 42, 0.5);
+  scrollbar-width: none;
+}
+
+.titleActions::-webkit-scrollbar {
+  display: none;
 }
 
 .hiddenFileInput {
@@ -2678,7 +2686,8 @@
 
 .settingsSectionHeader span,
 .settingsField small,
-.settingsHint {
+.settingsHint,
+.settingsScheduleNote {
   color: var(--monitor-muted);
   font-size: 12px;
   line-height: 1.5;
@@ -2699,6 +2708,13 @@
 
 .settingsField input {
   min-height: 42px;
+}
+
+.settingsScheduleNote {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--monitor-accent) 18%, var(--monitor-line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--monitor-accent) 7%, var(--monitor-surface));
 }
 
 .settingsGrid {
@@ -4024,8 +4040,7 @@
 
   .titleActions {
     justify-content: flex-start;
-    width: fit-content;
-    max-width: 100%;
+    width: 100%;
   }
 
   .title {

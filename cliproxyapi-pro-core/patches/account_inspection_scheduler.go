@@ -2140,9 +2140,25 @@ func (item accountInspectionActionItem) toResult() accountInspectionResult {
 	}
 }
 
+func (s *accountInspectionScheduler) removeInspectionResultLocked(result accountInspectionResult) bool {
+	for index, current := range s.status.Results {
+		if !sameAccountInspectionResult(current, result) {
+			continue
+		}
+		s.status.Summary = adjustAccountInspectionSummaryForResult(s.status.Summary, current, -1)
+		s.status.Results = append(s.status.Results[:index], s.status.Results[index+1:]...)
+		return true
+	}
+	return false
+}
+
 func (s *accountInspectionScheduler) applyManualActionResultLocked(result accountInspectionResult) {
 	if result.Key == "" {
 		result.Key = accountInspectionKey(result.FileName, result.AuthIndex)
+	}
+	if result.Executed && result.Action == accountInspectionActionDelete {
+		s.removeInspectionResultLocked(result)
+		return
 	}
 	s.updateInspectionResultLocked(result, true, func(current accountInspectionResult) (accountInspectionResult, bool) {
 		merged := current
@@ -2155,6 +2171,11 @@ func (s *accountInspectionScheduler) applyManualActionResultLocked(result accoun
 		merged.Disabled = result.Disabled
 		merged.Executed = result.Executed
 		merged.ExecuteError = result.ExecuteError
+		if result.Executed && (result.Action == accountInspectionActionDisable || result.Action == accountInspectionActionEnable) {
+			merged.Action = accountInspectionActionKeep
+			merged.ActionReason = "无需处理"
+			merged.Error = ""
+		}
 		return merged, true
 	})
 }

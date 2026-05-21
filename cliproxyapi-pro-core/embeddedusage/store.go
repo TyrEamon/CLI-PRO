@@ -42,6 +42,7 @@ type MonitoringSettings struct {
 type MonitoringWebDAVBackupConfig struct {
 	Enabled         bool   `json:"enabled"`
 	IntervalMinutes int    `json:"intervalMinutes"`
+	RetentionDays   int    `json:"retentionDays"`
 	URL             string `json:"url"`
 	Username        string `json:"username"`
 	Password        string `json:"password"`
@@ -431,6 +432,9 @@ func normalizeMonitoringSettings(settings MonitoringSettings) MonitoringSettings
 	if settings.WebDAV.IntervalMinutes <= 0 {
 		settings.WebDAV.IntervalMinutes = 1440
 	}
+	if settings.WebDAV.RetentionDays < 0 {
+		settings.WebDAV.RetentionDays = 0
+	}
 	settings.WebDAV.URL = strings.TrimSpace(settings.WebDAV.URL)
 	settings.WebDAV.Username = strings.TrimSpace(settings.WebDAV.Username)
 	return settings
@@ -487,23 +491,16 @@ func (s *Store) ApplyRetention(ctx context.Context, now time.Time) (int64, error
 func (s *Store) GetQuotaCache(ctx context.Context, provider string, fileName string) ([]QuotaCacheEntry, error) {
 	query := `select id, provider, file_name, data_json, cached_at_ms, accessed_at_ms, version from quota_cache`
 	args := []any{}
-	conditions := []string{}
-	if provider != "" {
-		conditions = append(conditions, "provider = ?")
+	switch {
+	case provider != "" && fileName != "":
+		query += ` where provider = ? and file_name = ?`
+		args = append(args, provider, fileName)
+	case provider != "":
+		query += ` where provider = ?`
 		args = append(args, provider)
-	}
-	if fileName != "" {
-		conditions = append(conditions, "file_name = ?")
+	case fileName != "":
+		query += ` where file_name = ?`
 		args = append(args, fileName)
-	}
-	if len(conditions) > 0 {
-		query += " where "
-		for i, condition := range conditions {
-			if i > 0 {
-				query += " and "
-			}
-			query += condition
-		}
 	}
 	query += " order by cached_at_ms desc"
 
@@ -513,7 +510,6 @@ func (s *Store) GetQuotaCache(ctx context.Context, provider string, fileName str
 	}
 	defer rows.Close()
 
-	now := time.Now().UnixMilli()
 	entries := make([]QuotaCacheEntry, 0)
 	for rows.Next() {
 		var entry QuotaCacheEntry
@@ -528,9 +524,25 @@ func (s *Store) GetQuotaCache(ctx context.Context, provider string, fileName str
 		return nil, err
 	}
 	if provider != "" || fileName != "" {
-		_, _ = s.db.ExecContext(ctx, `update quota_cache set accessed_at_ms = ? where (? = '' or provider = ?) and (? = '' or file_name = ?)`, now, provider, provider, fileName, fileName)
+		_ = s.touchQuotaCache(ctx, provider, fileName, time.Now().UnixMilli())
 	}
 	return entries, nil
+}
+
+func (s *Store) touchQuotaCache(ctx context.Context, provider string, fileName string, accessedAt int64) error {
+	switch {
+	case provider != "" && fileName != "":
+		_, err := s.db.ExecContext(ctx, `update quota_cache set accessed_at_ms = ? where provider = ? and file_name = ?`, accessedAt, provider, fileName)
+		return err
+	case provider != "":
+		_, err := s.db.ExecContext(ctx, `update quota_cache set accessed_at_ms = ? where provider = ?`, accessedAt, provider)
+		return err
+	case fileName != "":
+		_, err := s.db.ExecContext(ctx, `update quota_cache set accessed_at_ms = ? where file_name = ?`, accessedAt, fileName)
+		return err
+	default:
+		return nil
+	}
 }
 
 func (s *Store) SetQuotaCache(ctx context.Context, entry QuotaCacheEntry) error {
@@ -592,12 +604,20 @@ func isSQLiteBusy(err error) bool {
 }
 
 func (s *Store) DeleteQuotaCache(ctx context.Context, provider string, fileName string) error {
-	if provider == "" && fileName == "" {
+	switch {
+	case provider == "" && fileName == "":
 		_, err := s.db.ExecContext(ctx, `delete from quota_cache`)
 		return err
+	case provider != "" && fileName != "":
+		_, err := s.db.ExecContext(ctx, `delete from quota_cache where provider = ? and file_name = ?`, provider, fileName)
+		return err
+	case provider != "":
+		_, err := s.db.ExecContext(ctx, `delete from quota_cache where provider = ?`, provider)
+		return err
+	default:
+		_, err := s.db.ExecContext(ctx, `delete from quota_cache where file_name = ?`, fileName)
+		return err
 	}
-	_, err := s.db.ExecContext(ctx, `delete from quota_cache where (? = '' or provider = ?) and (? = '' or file_name = ?)`, provider, provider, fileName, fileName)
-	return err
 }
 
 func (s *Store) QuotaCacheStats(ctx context.Context) (QuotaCacheStats, error) {

@@ -252,7 +252,22 @@ func (s *Server) handleUsageExport(c *gin.Context) {
 func (s *Server) handleUsageImport(c *gin.Context) {
 	reader := bufio.NewScanner(c.Request.Body)
 	reader.Buffer(make([]byte, 64*1024), 10*1024*1024)
-	events := make([]internalusage.Event, 0)
+	events := make([]internalusage.Event, 0, s.cfg.BatchSize)
+	result := InsertResult{}
+	totalEvents := 0
+	flushEvents := func() error {
+		if len(events) == 0 {
+			return nil
+		}
+		batchResult, err := s.store.InsertEvents(c.Request.Context(), events)
+		if err != nil {
+			return err
+		}
+		result.Inserted += batchResult.Inserted
+		result.Skipped += batchResult.Skipped
+		events = events[:0]
+		return nil
+	}
 	var modelPrices map[string]ModelPrice
 	modelPriceRecords := 0
 	var quotaEntries []QuotaCacheEntry
@@ -317,13 +332,19 @@ func (s *Server) handleUsageImport(c *gin.Context) {
 			continue
 		}
 		events = append(events, event)
+		totalEvents++
+		if len(events) >= s.cfg.BatchSize {
+			if err := flushEvents(); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+		}
 	}
 	if err := reader.Err(); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	result, err := s.store.InsertEvents(c.Request.Context(), events)
-	if err != nil {
+	if err := flushEvents(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -356,7 +377,7 @@ func (s *Server) handleUsageImport(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"added":                            result.Inserted,
 		"skipped":                          result.Skipped,
-		"total":                            len(events),
+		"total":                            totalEvents,
 		"failed":                           failed,
 		"modelPrices":                      len(modelPrices),
 		"modelPriceRecords":                modelPriceRecords,
