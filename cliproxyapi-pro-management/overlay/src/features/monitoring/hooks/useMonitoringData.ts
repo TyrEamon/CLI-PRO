@@ -138,17 +138,11 @@ const buildConfiguredApiKeyMap = (apiKeys: readonly string[] | undefined) => {
   };
 };
 
-type MonitoringConfigWithNativeProviders = Config & {
-  antigravityApiKeys?: SourceInfoMapInput['antigravityApiKeys'];
-};
-
 type MonitoringApiKeyIdentity = {
   id: string;
   hash: string;
   masked: string;
 };
-
-type MonitoringAuthType = 'oauth' | 'apikey';
 
 type MonitoringChannelMeta = {
   key: string;
@@ -158,7 +152,7 @@ type MonitoringChannelMeta = {
   disabled: boolean;
   authIndices: string[];
   modelNames: string[];
-  authType?: MonitoringAuthType;
+  authType?: 'oauth' | 'apikey' | '';
 };
 
 type MonitoringAuthMeta = {
@@ -456,12 +450,6 @@ type MonitoringMetaPayload = {
   error: string;
 };
 
-const extractConfiguredModelName = (item: unknown) => {
-  if (typeof item === 'string') return readStringValue(item);
-  if (!isRecordValue(item)) return '';
-  return readStringValue(item.name ?? item.alias ?? item.id ?? item.model);
-};
-
 const normalizeOpenAIChannel = (value: unknown, index: number): MonitoringChannelMeta | null => {
   if (!isRecordValue(value)) return null;
 
@@ -489,7 +477,13 @@ const normalizeOpenAIChannel = (value: unknown, index: number): MonitoringChanne
   });
 
   const modelNames = Array.isArray(value.models)
-    ? value.models.map(extractConfiguredModelName).filter(Boolean)
+    ? value.models
+        .map((item) => {
+          if (typeof item === 'string') return readStringValue(item);
+          if (!isRecordValue(item)) return '';
+          return readStringValue(item.name ?? item.alias ?? item.id ?? item.model);
+        })
+        .filter(Boolean)
     : [];
 
   return {
@@ -1452,10 +1446,10 @@ const buildEventRows = (
       const account = authMeta?.account || sourceLabel;
       const accountMasked = maskEmailLike(account);
       const resolvedProvider = (detail.provider || authMeta?.provider || sourceMeta.type || '-').toLowerCase();
-      const resolvedAuthType: MonitoringAuthType = detail.auth_type === 'apikey' ? 'apikey' : 'oauth';
+      const resolvedAuthType = detail.auth_type || (authMeta ? (authMeta.runtimeOnly ? '' : 'oauth') : '');
       const channelMeta = channelByAuthIndex.get(authIndex)
         ?? (resolvedProvider !== '-'
-          ? (channelByAuthIndex.get(`provider:${resolvedAuthType}:${resolvedProvider}`)
+          ? (channelByAuthIndex.get(`provider:${resolvedAuthType === 'apikey' ? 'apikey' : 'oauth'}:${resolvedProvider}`)
             ?? channelByAuthIndex.get(`provider:oauth:${resolvedProvider}`)
             ?? channelByAuthIndex.get(`provider:apikey:${resolvedProvider}`))
           : undefined);
@@ -1573,10 +1567,6 @@ const buildNativeProviderChannels = (
     { items: config?.geminiApiKeys, type: 'gemini' },
     { items: config?.claudeApiKeys, type: 'claude' },
     { items: config?.codexApiKeys, type: 'codex' },
-    {
-      items: (config as MonitoringConfigWithNativeProviders | null | undefined)?.antigravityApiKeys,
-      type: 'antigravity',
-    },
     { items: config?.vertexApiKeys, type: 'vertex' },
   ];
 
@@ -1589,7 +1579,7 @@ const buildNativeProviderChannels = (
       if (authIndex) bucket.authIndices.add(authIndex);
       if (Array.isArray(item.models)) {
         item.models.forEach((m) => {
-          const name = extractConfiguredModelName(m);
+          const name = typeof m === 'string' ? m.trim() : '';
           if (name) bucket.modelNames.add(name);
         });
       }
@@ -1664,9 +1654,9 @@ const loadMonitoringMetaPayload = async (
   const nativeChannels = buildNativeProviderChannels(config, authFiles);
   const openaiChannelAuthIndices = new Set(channels.flatMap((ch) => ch.authIndices));
   nativeChannels.forEach((nativeCh) => {
-    const authIndices = nativeCh.authIndices.filter((idx) => !openaiChannelAuthIndices.has(idx));
-    if (authIndices.length > 0) {
-      channels.push({ ...nativeCh, authIndices });
+    const hasOverlap = nativeCh.authIndices.some((idx) => openaiChannelAuthIndices.has(idx));
+    if (!hasOverlap) {
+      channels.push(nativeCh);
     }
   });
 
@@ -1750,7 +1740,7 @@ export function useMonitoringData({
         geminiApiKeys: config?.geminiApiKeys || [],
         claudeApiKeys: config?.claudeApiKeys || [],
         codexApiKeys: config?.codexApiKeys || [],
-        antigravityApiKeys: (config as MonitoringConfigWithNativeProviders | null | undefined)?.antigravityApiKeys || [],
+        antigravityApiKeys: (config as Config & { antigravityApiKeys?: SourceInfoMapInput['antigravityApiKeys'] } | null | undefined)?.antigravityApiKeys || [],
         vertexApiKeys: config?.vertexApiKeys || [],
         openaiCompatibility: config?.openaiCompatibility || [],
       }),
