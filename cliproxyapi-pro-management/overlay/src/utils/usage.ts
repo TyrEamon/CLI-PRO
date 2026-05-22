@@ -26,6 +26,8 @@ export interface UsageDetail {
   source: string;
   auth_index: string | number | null;
   api_key_hash?: string;
+  provider?: string;
+  auth_type?: string;
   latency_ms?: number;
   tokens: UsageTokens;
   failed: boolean;
@@ -228,6 +230,13 @@ const buildUsageDetail = (
   const timestampMs = parseTimestampMs(timestamp);
   const latencyMs = extractLatencyMs(detailRaw);
 
+  const provider = typeof detailRaw.provider === 'string' ? detailRaw.provider.trim() : undefined;
+  const authType = typeof detailRaw.auth_type === 'string'
+    ? detailRaw.auth_type.trim()
+    : typeof detailRaw.authType === 'string'
+      ? (detailRaw.authType as string).trim()
+      : undefined;
+
   return {
     timestamp,
     source: normalizeSourceWithCache(sourceCache, detailRaw.source),
@@ -240,6 +249,8 @@ const buildUsageDetail = (
       : typeof detailRaw.apiKeyHash === 'string'
         ? detailRaw.apiKeyHash
         : undefined,
+    provider: provider || undefined,
+    auth_type: authType || undefined,
     latency_ms: latencyMs ?? undefined,
     tokens: readTokens(detailRaw),
     failed: detailRaw.failed === true,

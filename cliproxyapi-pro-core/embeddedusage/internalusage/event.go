@@ -53,6 +53,8 @@ type Detail struct {
 	Source     string `json:"source"`
 	AuthIndex  string `json:"auth_index,omitempty"`
 	APIKeyHash string `json:"api_key_hash,omitempty"`
+	Provider   string `json:"provider,omitempty"`
+	AuthType   string `json:"auth_type,omitempty"`
 	LatencyMS  *int64 `json:"latency_ms,omitempty"`
 	Tokens     Tokens `json:"tokens"`
 	Failed     bool   `json:"failed"`
@@ -196,6 +198,8 @@ func BuildPayload(events []Event) Payload {
 			Source:     event.Source,
 			AuthIndex:  event.AuthIndex,
 			APIKeyHash: event.APIKeyHash,
+			Provider:   event.Provider,
+			AuthType:   event.AuthType,
 			LatencyMS:  event.LatencyMS,
 			Failed:     event.Failed,
 			Tokens: Tokens{

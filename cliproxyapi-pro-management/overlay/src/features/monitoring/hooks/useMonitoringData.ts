@@ -6,7 +6,7 @@ import type { Config } from '@/types/config';
 import type { CredentialInfo } from '@/types/sourceInfo';
 import { sha256Hex } from '@/utils/hash';
 import { isRecordValue, readBooleanValue, readStringValue } from '@/utils/quota';
-import { buildSourceInfoMap, resolveSourceDisplay, type SourceInfoMapInput } from '@/utils/sourceResolver';
+import { buildSourceInfoMap, resolveProviderDisplayLabel, resolveSourceDisplay, type SourceInfoMapInput } from '@/utils/sourceResolver';
 import {
   calculateCost,
   collectUsageDetailsWithEndpoint,
@@ -1442,8 +1442,10 @@ const buildEventRows = (
       const sourceMasked = maskEmailLike(sourceLabel);
       const account = authMeta?.account || sourceLabel;
       const accountMasked = maskEmailLike(account);
-      const channelMeta = channelByAuthIndex.get(authIndex);
-      const channelLabel = channelMeta?.name || authMeta?.provider || sourceMeta.type || '-';
+      const resolvedProvider = (detail.provider || authMeta?.provider || sourceMeta.type || '-').toLowerCase();
+      const channelMeta = channelByAuthIndex.get(authIndex)
+        ?? (resolvedProvider !== '-' ? channelByAuthIndex.get(`provider:${resolvedProvider}`) : undefined);
+      const channelLabel = channelMeta?.name || resolvedProvider;
       const endpoint = readStringValue(detail.__endpoint) || '-';
       const endpointMethod = readStringValue(detail.__endpointMethod) || '-';
       const endpointPath = readStringValue(detail.__endpointPath) || endpoint;
@@ -1496,7 +1498,7 @@ const buildEventRows = (
         authIndexMasked: maskAuthIndex(authIndex),
         clientApiKey: clientApiKeyIdentity,
         authLabel: authMeta?.label || sourceMasked,
-        provider: authMeta?.provider || sourceMeta.type || '-',
+        provider: resolvedProvider,
         planType: authMeta?.planType || '-',
         channel: channelLabel,
         channelHost: channelMeta?.host || '-',
@@ -1521,13 +1523,86 @@ const buildEventRows = (
           channelMeta?.host,
           endpointPath,
           endpointMethod,
-          authMeta?.provider,
+          resolvedProvider,
           authMeta?.planType,
           clientApiKeyIdentity.masked
         ),
       } satisfies MonitoringEventRow;
     })
     .filter(Boolean) as MonitoringEventRow[];
+
+const buildNativeProviderChannels = (
+  config: Config | null | undefined,
+  authFiles: AuthFileItem[]
+): MonitoringChannelMeta[] => {
+  const providerMap = new Map<string, {
+    authIndices: Set<string>;
+    modelNames: Set<string>;
+    disabled: boolean;
+  }>();
+
+  const ensureProvider = (provider: string) => {
+    if (!provider || provider === '-') return null;
+    const key = provider.trim().toLowerCase();
+    if (!key) return null;
+    let entry = providerMap.get(key);
+    if (!entry) {
+      entry = { authIndices: new Set(), modelNames: new Set(), disabled: false };
+      providerMap.set(key, entry);
+    }
+    return entry;
+  };
+
+  const apiKeyProviders: Array<{
+    items: Array<{ apiKey?: string; prefix?: string; authIndex?: string; models?: unknown[] }> | undefined;
+    type: string;
+  }> = [
+    { items: config?.geminiApiKeys, type: 'gemini' },
+    { items: config?.claudeApiKeys, type: 'claude' },
+    { items: config?.codexApiKeys, type: 'codex' },
+    { items: config?.vertexApiKeys, type: 'vertex' },
+  ];
+
+  apiKeyProviders.forEach(({ items, type }) => {
+    if (!items?.length) return;
+    const entry = ensureProvider(type);
+    if (!entry) return;
+    items.forEach((item) => {
+      const authIndex = normalizeAuthIndex(item.authIndex);
+      if (authIndex) entry.authIndices.add(authIndex);
+      if (Array.isArray(item.models)) {
+        item.models.forEach((m) => {
+          const name = typeof m === 'string' ? m.trim() : '';
+          if (name) entry.modelNames.add(name);
+        });
+      }
+    });
+  });
+
+  authFiles.forEach((file) => {
+    const provider = readStringValue(file.provider) || readStringValue(file.type);
+    if (!provider) return;
+    const entry = ensureProvider(provider);
+    if (!entry) return;
+    const authIndex = normalizeAuthIndex(file['auth_index'] ?? file.authIndex);
+    if (authIndex) entry.authIndices.add(authIndex);
+  });
+
+  const channels: MonitoringChannelMeta[] = [];
+  providerMap.forEach((entry, provider) => {
+    channels.push({
+      key: `provider:${provider}`,
+      name: resolveProviderDisplayLabel(provider),
+      baseUrl: '',
+      host: provider,
+      disabled: entry.disabled,
+      authIndices: Array.from(entry.authIndices),
+      modelNames: Array.from(entry.modelNames),
+    });
+  });
+
+  return channels;
+};
 
 const loadMonitoringMetaPayload = async (
   config: Config | null | undefined
@@ -1563,6 +1638,15 @@ const loadMonitoringMetaPayload = async (
       )
       .filter(Boolean) as MonitoringChannelMeta[];
   }
+
+  const nativeChannels = buildNativeProviderChannels(config, authFiles);
+  const openaiChannelAuthIndices = new Set(channels.flatMap((ch) => ch.authIndices));
+  nativeChannels.forEach((nativeCh) => {
+    const hasOverlap = nativeCh.authIndices.some((idx) => openaiChannelAuthIndices.has(idx));
+    if (!hasOverlap) {
+      channels.push(nativeCh);
+    }
+  });
 
   const error = [authResult, channelResult]
     .filter((result) => result.status === 'rejected')
@@ -1659,6 +1743,9 @@ export function useMonitoringData({
       channel.authIndices.forEach((authIndex) => {
         map.set(authIndex, channel);
       });
+      if (channel.key.startsWith('provider:')) {
+        map.set(channel.key, channel);
+      }
     });
     return map;
   }, [channels]);
