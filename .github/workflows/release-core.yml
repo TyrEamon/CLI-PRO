@@ -279,22 +279,28 @@ jobs:
       - name: Apply Pro management customizations
         run: bash customizations-repo/cliproxyapi-pro-management/apply.sh upstream-management
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: upstream-management/package-lock.json
+          bun-version: 1.3.14
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('upstream-management/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
 
       - name: Install management dependencies
         working-directory: upstream-management
-        run: npm ci
+        run: bun install --frozen-lockfile
 
       - name: Build management HTML
         working-directory: upstream-management
         env:
           VERSION: v${{ needs.check-version.outputs.management_version }}-pro
-        run: npm run build
+        run: bun run build
 
       - name: Prepare management asset
         working-directory: upstream-management
