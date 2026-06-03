@@ -110,12 +110,21 @@ export interface AccountInspectionHealthCounts {
   recoverable: number;
 }
 
+export interface AccountInspectionPageInfo {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  hasMore: boolean;
+}
+
 export interface AccountInspectionRunResult {
   results: AccountInspectionResultItem[];
   summary: AccountInspectionSummary;
   startedAt: number;
   finishedAt: number;
   healthCounts?: AccountInspectionHealthCounts;
+  resultsPage?: AccountInspectionPageInfo;
   resultsLimited?: boolean;
 }
 
@@ -166,6 +175,8 @@ export type AccountInspectionBackendStatus = {
     executedEnableCount?: number;
   };
   healthCounts?: AccountInspectionHealthCounts;
+  logsPage?: AccountInspectionPageInfo;
+  resultsPage?: AccountInspectionPageInfo;
   logsLimited?: boolean;
   resultsLimited?: boolean;
   logs: AccountInspectionBackendLog[] | null;
@@ -652,6 +663,7 @@ const buildAccountInspectionBackendRunResult = (
     startedAt,
     finishedAt,
     healthCounts: response.status.healthCounts,
+    resultsPage: response.status.resultsPage,
     resultsLimited: response.status.resultsLimited ?? false,
   };
 };
@@ -687,6 +699,7 @@ export const buildAccountInspectionBackendViewState = (
           timestamp: entry.time,
         }))
       : undefined,
+    logsPage: hasSnapshot ? response.status.logsPage : undefined,
     autoExecutionCounts: {
       delete: response.status.summary.executedDeleteCount ?? 0,
       disable: response.status.summary.executedDisableCount ?? 0,

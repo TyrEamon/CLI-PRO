@@ -32,6 +32,7 @@ import {
   type AccountInspectionAutoErrorAction,
   type AccountInspectionConfigurableSettings,
   type AccountInspectionLogLevel,
+  type AccountInspectionPageInfo,
   type AccountInspectionProgressSnapshot,
   type AccountInspectionResultItem,
   type AccountInspectionRunResult,
@@ -188,8 +189,9 @@ const crcTable = Array.from({ length: 256 }, (_, index) => {
 });
 
 const ACCOUNT_INSPECTION_LOG_LIMIT = 200;
-const ACCOUNT_INSPECTION_VISIBLE_RESULT_LIMIT = 300;
-const ACCOUNT_INSPECTION_VISIBLE_LOG_LIMIT = 120;
+const ACCOUNT_INSPECTION_RESULT_PAGE_SIZE = 100;
+const ACCOUNT_INSPECTION_LOG_PAGE_SIZE = 100;
+const ACCOUNT_INSPECTION_ACTION_PAGE_SIZE = 500;
 const ACCOUNT_INSPECTION_DETAILS_IDLE_DELAY_MS = 250;
 const ACCOUNT_INSPECTION_AUTH_FILES_IDLE_DELAY_MS = 300;
 const ACCOUNT_INSPECTION_ASSET_STATS_CHUNK_SIZE = 500;
@@ -200,6 +202,33 @@ type AccountInspectionIdleCallback = (deadline: { didTimeout: boolean; timeRemai
 
 const appendInspectionLogEntry = (entries: InspectionLogEntry[], entry: InspectionLogEntry) =>
   [...entries, entry].slice(-ACCOUNT_INSPECTION_LOG_LIMIT);
+
+const getPaginationRange = (pageInfo: AccountInspectionPageInfo | null, visibleCount: number) => {
+  if (!pageInfo || pageInfo.total <= 0 || visibleCount <= 0) {
+    return {
+      page: pageInfo?.page ?? 1,
+      pageSize: pageInfo?.pageSize ?? visibleCount,
+      total: pageInfo?.total ?? visibleCount,
+      totalPages: pageInfo?.totalPages ?? (visibleCount > 0 ? 1 : 0),
+      from: visibleCount > 0 ? 1 : 0,
+      to: visibleCount,
+      hasPrevious: (pageInfo?.page ?? 1) > 1,
+      hasNext: Boolean(pageInfo?.hasMore),
+    };
+  }
+
+  const from = (pageInfo.page - 1) * pageInfo.pageSize + 1;
+  return {
+    page: pageInfo.page,
+    pageSize: pageInfo.pageSize,
+    total: pageInfo.total,
+    totalPages: pageInfo.totalPages,
+    from,
+    to: Math.min(pageInfo.total, from + visibleCount - 1),
+    hasPrevious: pageInfo.page > 1,
+    hasNext: pageInfo.hasMore,
+  };
+};
 
 const getProviderInitial = (label: string) => label.trim().charAt(0).toUpperCase() || '?';
 
@@ -759,15 +788,6 @@ const buildInspectionResultsViewState = (items: AccountInspectionResultItem[]): 
     pending: 0,
   };
   const rows: InspectionResultViewRow[] = [];
-  const pushLimitedRow = (
-    target: InspectionResultViewRow[],
-    createRow: () => InspectionResultViewRow
-  ) => {
-    if (target.length >= ACCOUNT_INSPECTION_VISIBLE_RESULT_LIMIT) return null;
-    const row = createRow();
-    target.push(row);
-    return row;
-  };
 
   const pushResultRow = (
     target: InspectionResultViewRow[],
@@ -775,16 +795,17 @@ const buildInspectionResultsViewState = (items: AccountInspectionResultItem[]): 
     healthStatus: ResultHealthStatus,
     existingRow: InspectionResultViewRow | null
   ) => {
-    if (target.length >= ACCOUNT_INSPECTION_VISIBLE_RESULT_LIMIT) return existingRow;
     if (existingRow) {
       target.push(existingRow);
       return existingRow;
     }
-    return pushLimitedRow(target, () => ({
+    const row = {
       item,
       healthStatus,
       manualActions: getManualActionsByHealthStatus(item, healthStatus),
-    }));
+    };
+    target.push(row);
+    return row;
   };
 
   healthCounts.total = items.length;
@@ -1332,6 +1353,7 @@ type InspectionBackendState = {
   scheduleDraft: ScheduleDraft;
   schedule: InspectionScheduleSnapshot | null;
   logs: InspectionLogEntry[];
+  logsPage: AccountInspectionPageInfo | null;
   runStatus: RunStatus;
   progress: AccountInspectionProgressSnapshot;
   result: AccountInspectionRunResult | null;
@@ -1359,6 +1381,7 @@ const createInspectionBackendState = (settings: AccountInspectionConfigurableSet
   scheduleDraft: { enabled: false, intervalMinutes: '360' },
   schedule: null,
   logs: [],
+  logsPage: null,
   runStatus: 'idle',
   progress: createIdleAccountInspectionProgressSnapshot(),
   result: null,
@@ -1380,6 +1403,9 @@ const applyBackendViewState = (
   nextState = withChanged(nextState, 'runStatus', viewState.runStatus, sameRunStatus);
   if (viewState.logs) {
     nextState = withChanged(nextState, 'logs', viewState.logs, Object.is);
+  }
+  if (viewState.logsPage !== undefined) {
+    nextState = withChanged(nextState, 'logsPage', viewState.logsPage ?? null, Object.is);
   }
   if (viewState.result !== undefined) {
     nextState = withChanged(nextState, 'result', viewState.result, Object.is);
@@ -1476,6 +1502,7 @@ export function AccountInspectionPage() {
     scheduleDraft,
     schedule,
     logs,
+    logsPage,
     runStatus,
     progress,
     result,
@@ -1485,7 +1512,9 @@ export function AccountInspectionPage() {
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [logsCollapsed, setLogsCollapsed] = useState(false);
   const [resultFilter, setResultFilter] = useState<ResultFilter>('accountInvalid');
+  const [resultPage, setResultPage] = useState(1);
   const [logLevelFilter, setLogLevelFilter] = useState<AccountInspectionLogLevel | 'all'>('all');
+  const [logPage, setLogPage] = useState(1);
   const [authFiles, setAuthFiles] = useState<AuthFileItem[]>([]);
   const [authFilesLoaded, setAuthFilesLoaded] = useState(false);
   const [authFileStats, setAuthFileStats] = useState<AuthFileAccountStats>(() => createEmptyAuthFileAccountStats());
@@ -1508,7 +1537,7 @@ export function AccountInspectionPage() {
     auto: null,
   });
   const refreshedBackendFinishedAtRef = useRef(0);
-  const loadedBackendDetailsFinishedAtRef = useRef(0);
+  const loadedBackendDetailsKeyRef = useRef('');
 
 
   useEffect(() => {
@@ -1601,6 +1630,30 @@ export function AccountInspectionPage() {
     }
   }, [loadAuthFiles]);
 
+  const loadInspectionDetailsPage = useCallback(async () => {
+    const response = await accountInspectionApi.getStatus({
+      includeDetails: true,
+      resultPage,
+      resultPageSize: ACCOUNT_INSPECTION_RESULT_PAGE_SIZE,
+      resultFilter,
+      logPage,
+      logPageSize: ACCOUNT_INSPECTION_LOG_PAGE_SIZE,
+      logLevel: logLevelFilter,
+    });
+    applyBackendResponse(response, true);
+    return response;
+  }, [applyBackendResponse, logLevelFilter, logPage, resultFilter, resultPage]);
+
+  const currentInspectionDetailOptions = useMemo(() => ({
+    includeDetails: true,
+    resultPage,
+    resultPageSize: ACCOUNT_INSPECTION_RESULT_PAGE_SIZE,
+    resultFilter,
+    logPage,
+    logPageSize: ACCOUNT_INSPECTION_LOG_PAGE_SIZE,
+    logLevel: logLevelFilter,
+  }), [logLevelFilter, logPage, resultFilter, resultPage]);
+
   const loadBackendSchedule = useCallback(async () => {
     if (connectionStatus !== 'connected') return;
     try {
@@ -1663,20 +1716,21 @@ export function AccountInspectionPage() {
     if (connectionStatus !== 'connected') return;
     if (progress.status === 'running' || progress.status === 'paused') return;
     if (progress.startedAt <= 0 || (progress.total <= 0 && progress.summary.totalFiles <= 0)) return;
-    if (result && result.startedAt === progress.startedAt) return;
-    if (loadedBackendDetailsFinishedAtRef.current === progress.startedAt) return;
+    const detailKey = [
+      progress.startedAt,
+      resultFilter,
+      resultPage,
+      logLevelFilter,
+      logPage,
+    ].join(':');
+    if (loadedBackendDetailsKeyRef.current === detailKey) return;
 
     let cancelled = false;
     const loadDetails = async () => {
       try {
-        const response = await accountInspectionApi.getStatus({
-          includeDetails: true,
-          resultLimit: ACCOUNT_INSPECTION_VISIBLE_RESULT_LIMIT,
-          logLimit: ACCOUNT_INSPECTION_VISIBLE_LOG_LIMIT,
-        });
+        await loadInspectionDetailsPage();
         if (cancelled) return;
-        loadedBackendDetailsFinishedAtRef.current = response.status.lastStartedAt || progress.startedAt;
-        applyBackendResponse(response, true);
+        loadedBackendDetailsKeyRef.current = detailKey;
       } catch {
         // Keep the detail fetch retryable; a transient miss should not leave the table empty.
       }
@@ -1699,7 +1753,26 @@ export function AccountInspectionPage() {
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [applyBackendResponse, connectionStatus, progress.startedAt, progress.status, progress.summary.totalFiles, progress.total, result]);
+  }, [
+    connectionStatus,
+    loadInspectionDetailsPage,
+    logLevelFilter,
+    logPage,
+    progress.startedAt,
+    progress.status,
+    progress.summary.totalFiles,
+    progress.total,
+    resultFilter,
+    resultPage,
+  ]);
+
+  useEffect(() => {
+    setResultPage(1);
+  }, [resultFilter]);
+
+  useEffect(() => {
+    setLogPage(1);
+  }, [logLevelFilter]);
 
   const appendLog = useCallback((level: AccountInspectionLogLevel, message: string) => {
     dispatchBackendState({ type: 'appendLog', level, message, timestamp: Date.now() });
@@ -1729,6 +1802,8 @@ export function AccountInspectionPage() {
 
       dispatchBackendState({ type: 'startRun', timestamp: Date.now() });
       setLogsCollapsed(false);
+      setResultPage(1);
+      setLogPage(1);
 
       try {
         const response = await accountInspectionApi.runNow();
@@ -1841,7 +1916,7 @@ export function AccountInspectionPage() {
       appendLog('info', t('monitoring.account_inspection_execute_started'));
 
       try {
-        const response = await accountInspectionApi.executeActions(actionItems);
+        const response = await accountInspectionApi.executeActions(actionItems, currentInspectionDetailOptions);
         const failed = response.outcomes.filter((item) => !item.success);
         if (failed.length > 0) {
           showNotification(
@@ -1872,7 +1947,7 @@ export function AccountInspectionPage() {
         setExecuting(false);
       }
     },
-    [appendLog, applyBackendResponse, loadAuthFiles, result, showNotification, t]
+    [appendLog, applyBackendResponse, currentInspectionDetailOptions, loadAuthFiles, result, showNotification, t]
   );
 
   const allResults = useMemo(
@@ -1896,39 +1971,20 @@ export function AccountInspectionPage() {
   const hasAutoExecutionPolicy = hasAccountInspectionAutoExecutePolicies(inspectionSettings);
 
   const filteredResultRows = useMemo(() => {
-    if (resultFilter === 'pending' && hasAutoExecutionPolicy) return resultsViewState.rows;
     return filterRows[resultFilter];
-  }, [filterRows, hasAutoExecutionPolicy, resultFilter, resultsViewState.rows]);
-  const filteredResultRowCount = (() => {
-    if (!result?.resultsLimited) {
-      return resultFilter === 'pending' && hasAutoExecutionPolicy
-        ? allResults.length
-        : filterRowCounts[resultFilter];
-    }
-    if (resultFilter === 'pending') {
-      return result.summary.deleteCount + result.summary.disableCount + result.summary.enableCount;
-    }
-    if (resultFilter === 'accountInvalid') return displayedHealthCounts.authInvalid;
-    if (resultFilter === 'requestError') return displayedHealthCounts.inspectionError;
-    if (resultFilter === 'quotaExhausted') return displayedHealthCounts.quotaExhausted;
-    if (resultFilter === 'recoverable') return displayedHealthCounts.recoverable;
-    return displayedHealthCounts.healthy;
-  })();
-  const visibleResultRows = useMemo(
-    () => filteredResultRows.slice(0, ACCOUNT_INSPECTION_VISIBLE_RESULT_LIMIT),
-    [filteredResultRows]
-  );
-  const hiddenResultRowCount = Math.max(filteredResultRowCount - visibleResultRows.length, 0);
+  }, [filterRows, resultFilter]);
+  const resultPageInfo = result?.resultsPage ?? null;
+  const filteredResultRowCount = resultPageInfo?.total ?? filterRowCounts[resultFilter];
+  const visibleResultRows = filteredResultRows;
 
   const filteredLogs = useMemo(
     () => (logLevelFilter === 'all' ? logs : logs.filter((entry) => entry.level === logLevelFilter)),
     [logLevelFilter, logs]
   );
-  const visibleLogs = useMemo(
-    () => filteredLogs.slice(-ACCOUNT_INSPECTION_VISIBLE_LOG_LIMIT),
-    [filteredLogs]
-  );
-  const hiddenLogCount = Math.max(filteredLogs.length - visibleLogs.length, 0);
+  const logPageInfo = logsPage;
+  const visibleLogs = filteredLogs;
+  const resultPagination = getPaginationRange(resultPageInfo, visibleResultRows.length);
+  const logPagination = getPaginationRange(logPageInfo, visibleLogs.length);
 
   const handleExecutePlanned = useCallback(() => {
     if (!result) return;
@@ -1951,32 +2007,40 @@ export function AccountInspectionPage() {
       });
     };
 
-    if (result.resultsLimited) {
-      setLoadingFullInspectionDetails(true);
-      void accountInspectionApi.getStatus(true)
-        .then((response) => {
-          applyBackendResponse(response, true);
-          const fullResult = buildAccountInspectionBackendViewState(response).result;
-          const fullTargets = (fullResult?.results ?? []).filter((item) => isSuggestedAction(item) && !item.executed);
-          if (fullTargets.length === 0) {
-            showNotification(t('monitoring.account_inspection_no_pending_actions'), 'info');
-            return;
-          }
-          confirmTargets(fullTargets);
-        })
-        .catch((error) => handleAccountInspectionControlError(error, appendLog, showNotification, t('common.unknown_error')))
-        .finally(() => setLoadingFullInspectionDetails(false));
-      return;
-    }
+    const loadPendingTargets = async () => {
+      const targets: AccountInspectionResultItem[] = [];
+      let page = 1;
+      for (;;) {
+        const response = await accountInspectionApi.getStatus({
+          includeDetails: true,
+          resultFilter: 'pending',
+          resultPage: page,
+          resultPageSize: ACCOUNT_INSPECTION_ACTION_PAGE_SIZE,
+          logPage: 1,
+          logPageSize: 1,
+        });
+        const pageResult = buildAccountInspectionBackendViewState(response).result;
+        targets.push(...collectActionableInspectionResults(pageResult?.results ?? []));
+        const pageInfo = response.status.resultsPage;
+        if (!pageInfo?.hasMore) break;
+        page += 1;
+      }
+      return targets;
+    };
 
-    const targets = collectActionableInspectionResults(allResults);
-    const counts = countActions(targets);
-    if (counts.delete + counts.disable + counts.enable <= 0) {
-      showNotification(t('monitoring.account_inspection_no_pending_actions'), 'info');
-      return;
-    }
-    confirmTargets(targets);
-  }, [allResults, appendLog, applyBackendResponse, executeItems, inspectionSettings, result, showConfirmation, showNotification, t]);
+    setLoadingFullInspectionDetails(true);
+    void loadPendingTargets()
+      .then((targets) => {
+        const counts = countActions(targets);
+        if (counts.delete + counts.disable + counts.enable <= 0) {
+          showNotification(t('monitoring.account_inspection_no_pending_actions'), 'info');
+          return;
+        }
+        confirmTargets(targets);
+      })
+      .catch((error) => handleAccountInspectionControlError(error, appendLog, showNotification, t('common.unknown_error')))
+      .finally(() => setLoadingFullInspectionDetails(false));
+  }, [appendLog, executeItems, inspectionSettings, result, showConfirmation, showNotification, t]);
 
   const handleExecuteSingle = useCallback(
     (item: AccountInspectionResultItem, manualAction?: ManualAccountInspectionAction) => {
@@ -2015,7 +2079,7 @@ export function AccountInspectionPage() {
         account: item.fileName,
       }));
       try {
-        const response = await accountInspectionApi.inspectOne(toAccountInspectionApiItem(item));
+        const response = await accountInspectionApi.inspectOne(toAccountInspectionApiItem(item), currentInspectionDetailOptions);
         applyBackendResponse(response);
         if (response.result?.key) {
           const toast = formatInspectionResultToast(accountInspectionBackendResultToItem(response.result), t);
@@ -2029,7 +2093,7 @@ export function AccountInspectionPage() {
         setRecheckingKey(null);
       }
     },
-    [appendLog, applyBackendResponse, connectionStatus, showNotification, t]
+    [appendLog, applyBackendResponse, connectionStatus, currentInspectionDetailOptions, showNotification, t]
   );
 
   const refreshTokenSingle = useCallback(
@@ -2040,7 +2104,7 @@ export function AccountInspectionPage() {
         account: item.fileName,
       }));
       try {
-        const response = await accountInspectionApi.refreshToken(toAccountInspectionApiItem(item));
+        const response = await accountInspectionApi.refreshToken(toAccountInspectionApiItem(item), currentInspectionDetailOptions);
         applyBackendResponse(response);
         const refreshedItem = response.result?.key ? accountInspectionBackendResultToItem(response.result) : null;
         const toast = refreshedItem
@@ -2054,7 +2118,7 @@ export function AccountInspectionPage() {
         setRefreshingTokenKey(null);
       }
     },
-    [appendLog, applyBackendResponse, i18n.language, loadAuthFiles, showNotification, t]
+    [appendLog, applyBackendResponse, currentInspectionDetailOptions, i18n.language, loadAuthFiles, showNotification, t]
   );
 
   const handleRefreshTokenSingle = useCallback(
@@ -2171,9 +2235,9 @@ export function AccountInspectionPage() {
 
   const actionStats = useMemo(() => {
     const autoTotal = autoExecutionCounts.delete + autoExecutionCounts.disable + autoExecutionCounts.enable;
-    const manualDelete = result?.resultsLimited ? (result.summary.deleteCount ?? 0) : actionableActionCounts.delete;
-    const manualDisable = result?.resultsLimited ? (result.summary.disableCount ?? 0) : actionableActionCounts.disable;
-    const manualEnable = result?.resultsLimited ? (result.summary.enableCount ?? 0) : actionableActionCounts.enable;
+    const manualDelete = result?.summary.deleteCount ?? actionableActionCounts.delete;
+    const manualDisable = result?.summary.disableCount ?? actionableActionCounts.disable;
+    const manualEnable = result?.summary.enableCount ?? actionableActionCounts.enable;
     const manualTotal = manualDelete + manualDisable + manualEnable;
     return {
       autoTotal,
@@ -2189,7 +2253,7 @@ export function AccountInspectionPage() {
     };
   }, [actionableActionCounts, autoExecutionCounts, result]);
 
-  const pendingActionCount = result?.resultsLimited ? actionStats.manualTotal : filterRowCounts.pending;
+  const pendingActionCount = actionStats.manualTotal;
   const inspectionScopeLabel = inspectionSettings.targetType === ACCOUNT_INSPECTION_ALL_PROVIDER_TYPE
     ? t('monitoring.filter_all_providers')
     : resolveProviderDisplayLabel(inspectionSettings.targetType);
@@ -2243,21 +2307,13 @@ export function AccountInspectionPage() {
       ? t('monitoring.account_inspection_results_error_empty')
       : t('monitoring.account_inspection_empty');
   const resultFilterTabs = useMemo<Array<{ key: ResultFilter; label: string }>>(() => [
-    ...(!hasAutoExecutionPolicy
-      ? [{ key: 'pending' as const, label: t('monitoring.account_inspection_filter_pending') }]
-      : []),
+    { key: 'pending', label: t('monitoring.account_inspection_filter_pending') },
     { key: 'accountInvalid', label: t('monitoring.account_inspection_account_invalid') },
     { key: 'requestError', label: t('monitoring.account_inspection_account_request_error') },
     { key: 'quotaExhausted', label: t('monitoring.account_inspection_health_quota_exhausted') },
     { key: 'recoverable', label: t('monitoring.account_inspection_health_recoverable') },
     { key: 'highAvailable', label: t('monitoring.account_inspection_high_available') },
-  ], [hasAutoExecutionPolicy, t]);
-
-  useEffect(() => {
-    if (hasAutoExecutionPolicy && resultFilter === 'pending') {
-      setResultFilter('accountInvalid');
-    }
-  }, [hasAutoExecutionPolicy, resultFilter]);
+  ], [t]);
   const logLevelOptions = useMemo<Array<{ key: AccountInspectionLogLevel | 'all'; label: string }>>(() => [
     { key: 'all', label: t('monitoring.account_inspection_filter_all') },
     { key: 'success', label: t('monitoring.account_inspection_log_success') },
@@ -2874,13 +2930,26 @@ export function AccountInspectionPage() {
                 </tbody>
               </table>
             </div>
-            {hiddenResultRowCount > 0 ? (
-              <div className={styles.renderLimitHint}>
-                {t('monitoring.request_events_limit_hint', {
-                  shown: visibleResultRows.length,
-                  total: filteredResultRowCount,
-                  defaultValue: `Showing ${visibleResultRows.length} of ${filteredResultRowCount} rows to keep rendering responsive.`,
-                })}
+            {filteredResultRowCount > 0 ? (
+              <div className={styles.paginationBar}>
+                <span>
+                  {t('monitoring.pagination_info', {
+                    from: resultPagination.from,
+                    to: resultPagination.to,
+                    total: resultPagination.total,
+                    page: resultPagination.page,
+                    totalPages: resultPagination.totalPages,
+                    defaultValue: `${resultPagination.from}-${resultPagination.to} / ${resultPagination.total}`,
+                  })}
+                </span>
+                <div className={styles.paginationActions}>
+                  <Button size="sm" variant="secondary" onClick={() => setResultPage((page) => Math.max(1, page - 1))} disabled={!resultPagination.hasPrevious}>
+                    {t('monitoring.pagination_previous')}
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={() => setResultPage((page) => page + 1)} disabled={!resultPagination.hasNext}>
+                    {t('monitoring.pagination_next')}
+                  </Button>
+                </div>
               </div>
             ) : null}
           </>
@@ -2917,13 +2986,26 @@ export function AccountInspectionPage() {
         <Card className={styles.panel}>
           {!logsCollapsed ? (
             <div ref={logListRef} className={styles.logList}>
-              {hiddenLogCount > 0 ? (
-                <div className={styles.renderLimitHint}>
-                  {t('monitoring.request_events_limit_hint', {
-                    shown: visibleLogs.length,
-                    total: filteredLogs.length,
-                    defaultValue: `Showing ${visibleLogs.length} of ${filteredLogs.length} rows to keep rendering responsive.`,
-                  })}
+              {(logPageInfo?.total ?? filteredLogs.length) > 0 ? (
+                <div className={styles.paginationBar}>
+                  <span>
+                    {t('monitoring.pagination_info', {
+                      from: logPagination.from,
+                      to: logPagination.to,
+                      total: logPagination.total,
+                      page: logPagination.page,
+                      totalPages: logPagination.totalPages,
+                      defaultValue: `${logPagination.from}-${logPagination.to} / ${logPagination.total}`,
+                    })}
+                  </span>
+                  <div className={styles.paginationActions}>
+                    <Button size="sm" variant="secondary" onClick={() => setLogPage((page) => Math.max(1, page - 1))} disabled={!logPagination.hasPrevious}>
+                      {t('monitoring.pagination_previous')}
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => setLogPage((page) => page + 1)} disabled={!logPagination.hasNext}>
+                      {t('monitoring.pagination_next')}
+                    </Button>
+                  </div>
                 </div>
               ) : null}
               {filteredLogs.length > 0 ? visibleLogs.map((entry) => (

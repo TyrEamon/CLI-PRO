@@ -20,47 +20,24 @@ func testStatusCode(value int) *int {
 	return &value
 }
 
-func TestLimitAccountInspectionResultsKeepsEachHealthBucket(t *testing.T) {
+func TestPaginateAccountInspectionResultsReturnsRequestedPage(t *testing.T) {
 	results := []accountInspectionResult{
 		testInspectionResult("healthy-1", accountInspectionActionKeep, false, nil, false, ""),
 		testInspectionResult("healthy-2", accountInspectionActionKeep, false, nil, false, ""),
 		testInspectionResult("auth-1", accountInspectionActionDelete, false, nil, false, ""),
 		testInspectionResult("auth-2", accountInspectionActionKeep, false, testStatusCode(401), false, ""),
-		testInspectionResult("quota-1", accountInspectionActionDisable, false, nil, false, ""),
-		testInspectionResult("quota-2", accountInspectionActionKeep, false, nil, true, ""),
-		testInspectionResult("error-1", accountInspectionActionKeep, false, nil, false, "network error"),
-		testInspectionResult("error-2", accountInspectionActionKeep, false, nil, false, "timeout"),
-		testInspectionResult("recoverable-1", accountInspectionActionEnable, true, nil, false, ""),
-		testInspectionResult("recoverable-2", accountInspectionActionKeep, true, nil, false, ""),
-		testInspectionResult("disabled-1", accountInspectionActionKeep, true, nil, false, ""),
-		testInspectionResult("disabled-2", accountInspectionActionKeep, true, nil, false, ""),
 	}
 
-	limited, wasLimited := limitAccountInspectionResults(results, 1, accountInspectionResultHealthCounts(results), 3)
-	if !wasLimited {
-		t.Fatal("limitAccountInspectionResults() wasLimited = false, want true")
+	page, info := paginateAccountInspectionResults(results, 2, 2, "")
+	if info.Page != 2 || info.PageSize != 2 || info.Total != 4 || info.TotalPages != 2 || info.HasMore {
+		t.Fatalf("page info = %+v, want page=2 size=2 total=4 totalPages=2 hasMore=false", info)
 	}
-
-	seenBuckets := make(map[accountInspectionHealthBucket]int)
-	for _, result := range limited {
-		seenBuckets[accountInspectionResultHealthBucketOf(result)]++
-	}
-
-	for _, bucket := range []accountInspectionHealthBucket{
-		accountInspectionHealthHealthy,
-		accountInspectionHealthAuthInvalid,
-		accountInspectionHealthQuotaExhausted,
-		accountInspectionHealthInspectionError,
-		accountInspectionHealthRecoverable,
-		accountInspectionHealthDisabled,
-	} {
-		if seenBuckets[bucket] != 1 {
-			t.Fatalf("bucket %s count = %d, want 1; limited=%v", bucket, seenBuckets[bucket], limited)
-		}
+	if len(page) != 2 || page[0].Key != "auth-1" || page[1].Key != "auth-2" {
+		t.Fatalf("page = %+v, want auth-1/auth-2", page)
 	}
 }
 
-func TestLimitAccountInspectionResultsStopsAfterRepresentativeWindow(t *testing.T) {
+func TestPaginateAccountInspectionResultsFiltersHealthBuckets(t *testing.T) {
 	results := []accountInspectionResult{
 		testInspectionResult("healthy", accountInspectionActionKeep, false, nil, false, ""),
 		testInspectionResult("auth", accountInspectionActionDelete, false, nil, false, ""),
@@ -68,36 +45,22 @@ func TestLimitAccountInspectionResultsStopsAfterRepresentativeWindow(t *testing.
 		testInspectionResult("error", accountInspectionActionKeep, false, nil, false, "network error"),
 		testInspectionResult("recoverable", accountInspectionActionEnable, true, nil, false, ""),
 		testInspectionResult("disabled", accountInspectionActionKeep, true, nil, false, ""),
-		testInspectionResult("late-healthy", accountInspectionActionKeep, false, nil, false, ""),
 	}
 
-	limited, wasLimited := limitAccountInspectionResults(results, 1, accountInspectionResultHealthCounts(results), 3)
-	if !wasLimited {
-		t.Fatal("limitAccountInspectionResults() wasLimited = false, want true")
+	page, info := paginateAccountInspectionResults(results, 1, 10, "quotaExhausted")
+	if info.Total != 1 || info.HasMore {
+		t.Fatalf("quota page info = %+v, want total=1 hasMore=false", info)
 	}
-	if len(limited) != 6 {
-		t.Fatalf("limited len = %d, want representative six buckets; limited=%v", len(limited), limited)
-	}
-	for _, result := range limited {
-		if result.Key == "late-healthy" {
-			t.Fatalf("limitAccountInspectionResults() included late row after representative window: %v", limited)
-		}
-	}
-}
-
-func TestLimitAccountInspectionResultsStopsWhenMissingBucketsHaveNoTargets(t *testing.T) {
-	results := []accountInspectionResult{
-		testInspectionResult("healthy-1", accountInspectionActionKeep, false, nil, false, ""),
-		testInspectionResult("healthy-2", accountInspectionActionKeep, false, nil, false, ""),
-		testInspectionResult("late-healthy", accountInspectionActionKeep, false, nil, false, ""),
+	if len(page) != 1 || page[0].Key != "quota" {
+		t.Fatalf("quota page = %+v, want quota", page)
 	}
 
-	limited, wasLimited := limitAccountInspectionResults(results, 1, accountInspectionResultHealthCounts(results), 0)
-	if !wasLimited {
-		t.Fatal("limitAccountInspectionResults() wasLimited = false, want true")
+	page, info = paginateAccountInspectionResults(results, 1, 10, "pending")
+	if info.Total != 3 {
+		t.Fatalf("pending page info = %+v, want total=3", info)
 	}
-	if len(limited) != 1 || limited[0].Key != "healthy-1" {
-		t.Fatalf("limited = %+v, want only first healthy representative", limited)
+	if len(page) != 3 || page[0].Key != "auth" || page[1].Key != "quota" || page[2].Key != "recoverable" {
+		t.Fatalf("pending page = %+v, want auth/quota/recoverable", page)
 	}
 }
 
@@ -118,9 +81,12 @@ func TestStreamStatusLockedOmitsDetailsForLightSnapshots(t *testing.T) {
 	if status.ResultsLimited || status.LogsLimited {
 		t.Fatalf("streamStatusLocked(light) limited flags = results:%v logs:%v, want false", status.ResultsLimited, status.LogsLimited)
 	}
+	if status.ResultsPage != nil || status.LogsPage != nil {
+		t.Fatalf("streamStatusLocked(light) leaked page info: results=%v logs=%v", status.ResultsPage, status.LogsPage)
+	}
 }
 
-func TestStreamStatusLockedReturnsLimitedDetailsWithFullHealthCounts(t *testing.T) {
+func TestStreamStatusLockedReturnsPagedDetailsWithFullHealthCounts(t *testing.T) {
 	scheduler := &accountInspectionScheduler{
 		status: accountInspectionStatus{
 			Results: []accountInspectionResult{
@@ -139,8 +105,10 @@ func TestStreamStatusLockedReturnsLimitedDetailsWithFullHealthCounts(t *testing.
 
 	status := scheduler.streamStatusLocked(accountInspectionSnapshotOptions{
 		IncludeDetails: true,
-		ResultLimit:    1,
-		LogLimit:       2,
+		ResultPage:     2,
+		ResultPageSize: 2,
+		LogPage:        1,
+		LogPageSize:    2,
 	})
 
 	if status.HealthCounts == nil {
@@ -149,14 +117,46 @@ func TestStreamStatusLockedReturnsLimitedDetailsWithFullHealthCounts(t *testing.
 	if status.HealthCounts.Total != 4 || status.HealthCounts.Healthy != 2 || status.HealthCounts.AuthInvalid != 2 {
 		t.Fatalf("HealthCounts = %+v, want total=4 healthy=2 authInvalid=2", *status.HealthCounts)
 	}
-	if !status.ResultsLimited || !status.LogsLimited {
-		t.Fatalf("limited flags = results:%v logs:%v, want true/true", status.ResultsLimited, status.LogsLimited)
+	if status.ResultsPage == nil || status.ResultsPage.Total != 4 || status.ResultsPage.Page != 2 || status.ResultsPage.PageSize != 2 {
+		t.Fatalf("ResultsPage = %+v, want page=2 size=2 total=4", status.ResultsPage)
+	}
+	if status.LogsPage == nil || status.LogsPage.Total != 3 || status.LogsPage.Page != 1 || status.LogsPage.PageSize != 2 || !status.LogsPage.HasMore {
+		t.Fatalf("LogsPage = %+v, want page=1 size=2 total=3 hasMore=true", status.LogsPage)
 	}
 	if len(status.Results) != 2 {
-		t.Fatalf("limited results len = %d, want 2 health-bucket rows", len(status.Results))
+		t.Fatalf("paged results len = %d, want 2", len(status.Results))
+	}
+	if status.Results[0].Key != "auth-1" || status.Results[1].Key != "auth-2" {
+		t.Fatalf("paged results = %+v, want auth rows", status.Results)
 	}
 	if len(status.Logs) != 2 || status.Logs[0].Time != 2 || status.Logs[1].Time != 3 {
-		t.Fatalf("limited logs = %+v, want last two log entries", status.Logs)
+		t.Fatalf("paged logs = %+v, want last two log entries", status.Logs)
+	}
+}
+
+func TestPaginateAccountInspectionPageSizeCapsAtServerMax(t *testing.T) {
+	results := make([]accountInspectionResult, accountInspectionMaxResultPageSize+5)
+	for index := range results {
+		results[index] = testInspectionResult("result", accountInspectionActionKeep, false, nil, false, "")
+	}
+	page, info := paginateAccountInspectionResults(results, 1, accountInspectionMaxResultPageSize+100, "")
+	if info.PageSize != accountInspectionMaxResultPageSize {
+		t.Fatalf("result page size = %d, want capped %d", info.PageSize, accountInspectionMaxResultPageSize)
+	}
+	if len(page) != accountInspectionMaxResultPageSize {
+		t.Fatalf("result page len = %d, want %d", len(page), accountInspectionMaxResultPageSize)
+	}
+
+	logs := make([]accountInspectionLogEntry, accountInspectionMaxLogPageSize+5)
+	for index := range logs {
+		logs[index] = accountInspectionLogEntry{Time: int64(index + 1), Level: "info", Message: "log"}
+	}
+	logPage, logInfo := paginateAccountInspectionLogs(logs, 1, accountInspectionMaxLogPageSize+100, "")
+	if logInfo.PageSize != accountInspectionMaxLogPageSize {
+		t.Fatalf("log page size = %d, want capped %d", logInfo.PageSize, accountInspectionMaxLogPageSize)
+	}
+	if len(logPage) != accountInspectionMaxLogPageSize {
+		t.Fatalf("log page len = %d, want %d", len(logPage), accountInspectionMaxLogPageSize)
 	}
 }
 

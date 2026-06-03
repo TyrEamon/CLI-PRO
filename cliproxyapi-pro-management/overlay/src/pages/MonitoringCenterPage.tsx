@@ -88,8 +88,8 @@ const ACCOUNT_STATUS_BLOCK_COUNT = 20;
 const ACCOUNT_STATUS_BLOCK_DURATION_MS = 10 * 60 * 1000;
 const ACCOUNT_STATS_ANALYTICS_ROW_LIMIT = 6000;
 const REQUEST_LOG_INTERACTION_ROW_LIMIT = 6000;
-const REALTIME_LOG_RENDER_LIMIT = 800;
-const REALTIME_LOG_ENRICH_LIMIT = 2400;
+const REALTIME_LOG_PAGE_SIZE = 100;
+const REALTIME_LOG_ENRICH_LIMIT = REQUEST_LOG_INTERACTION_ROW_LIMIT;
 const ACCOUNT_STATUS_COLOR_STOPS = [
   { r: 239, g: 68, b: 68 },
   { r: 250, g: 204, b: 21 },
@@ -1111,7 +1111,7 @@ const buildRealtimeLogRows = (rows: MonitoringEventRow[]): RealtimeLogRow[] => {
     ? rows.slice(0, REALTIME_LOG_ENRICH_LIMIT)
     : rows;
   const metricsByStream = new Map<string, { total: number; success: number; pattern: boolean[] }>();
-  const renderLimit = Math.min(candidateRows.length, REALTIME_LOG_RENDER_LIMIT);
+  const renderLimit = candidateRows.length;
   const enriched = new Array<RealtimeLogRow>(renderLimit);
   let outputIndex = renderLimit - 1;
 
@@ -1146,6 +1146,21 @@ const buildRealtimeLogRows = (rows: MonitoringEventRow[]): RealtimeLogRow[] => {
   }
 
   return enriched;
+};
+
+const getClientPaginationRange = (page: number, pageSize: number, total: number, visibleCount: number) => {
+  const normalizedPage = Math.max(1, page);
+  const totalPages = total > 0 ? Math.ceil(total / pageSize) : 0;
+  const from = total > 0 && visibleCount > 0 ? (normalizedPage - 1) * pageSize + 1 : 0;
+  return {
+    page: normalizedPage,
+    total,
+    totalPages,
+    from,
+    to: visibleCount > 0 ? Math.min(total, from + visibleCount - 1) : 0,
+    hasPrevious: normalizedPage > 1,
+    hasNext: normalizedPage < totalPages,
+  };
 };
 
 function UsageTrendHeader({
@@ -2668,6 +2683,7 @@ export function MonitoringCenterPage() {
   const [usageTrendApiKey, setUsageTrendApiKey] = useState('all');
   const [accountStatsMetric, setAccountStatsMetric] = useState<AccountSortMetric>('recent');
   const [isAccountStatsHidden, setIsAccountStatsHidden] = useState(false);
+  const [realtimeLogPage, setRealtimeLogPage] = useState(1);
   const accountQuotaStatesRef = useRef<Record<string, AccountQuotaState>>({});
   const accountQuotaRequestIdsRef = useRef<Record<string, number>>({});
   const deferredSearch = useDeferredValue(searchInput);
@@ -3051,6 +3067,22 @@ export function MonitoringCenterPage() {
   );
   const timeRangeLabel = useMemo(() => buildUsageTrendRangeLabel(timeRange, t), [timeRange, t]);
   const realtimeLogRows = useMemo(() => buildRealtimeLogRows(scopedRows), [scopedRows]);
+  const realtimeLogTotalPages = realtimeLogRows.length > 0 ? Math.ceil(realtimeLogRows.length / REALTIME_LOG_PAGE_SIZE) : 0;
+  const normalizedRealtimeLogPage = Math.min(Math.max(1, realtimeLogPage), Math.max(1, realtimeLogTotalPages));
+  const realtimeLogPageRows = useMemo(() => {
+    const start = (normalizedRealtimeLogPage - 1) * REALTIME_LOG_PAGE_SIZE;
+    return realtimeLogRows.slice(start, start + REALTIME_LOG_PAGE_SIZE);
+  }, [normalizedRealtimeLogPage, realtimeLogRows]);
+  const realtimeLogPagination = getClientPaginationRange(
+    normalizedRealtimeLogPage,
+    REALTIME_LOG_PAGE_SIZE,
+    realtimeLogRows.length,
+    realtimeLogPageRows.length
+  );
+
+  useEffect(() => {
+    setRealtimeLogPage(1);
+  }, [deferredSearch, selectedApiKey, selectedModel, selectedProvider, selectedStatus, timeRange]);
 
   const accountQuotaTargetsByAccount = useMemo(
     () => buildAccountQuotaTargetsByAccount(accountStatsFilteredRows, authFilesByAuthIndex),
@@ -3315,9 +3347,10 @@ export function MonitoringCenterPage() {
           {usageDetailsLimited ? (
             <div className={styles.inlineMetrics}>
               <span>
-                {t('monitoring.request_events_limit_hint', {
+                {t('monitoring.request_events_page_source_hint', {
                   shown: usageDetailsCount,
                   total: usageTotalRequests,
+                  defaultValue: `Loaded ${usageDetailsCount} recent events out of ${usageTotalRequests}.`,
                 })}
               </span>
             </div>
@@ -3498,21 +3531,37 @@ export function MonitoringCenterPage() {
           <span>{`${t('monitoring.recent_failures')}: ${scopedFailureCount}`}</span>
           {requestLogRowsLimited ? (
             <span>
-              {t('monitoring.request_events_limit_hint', {
+              {t('monitoring.request_events_page_source_hint', {
                 shown: requestLogRows.length,
                 total: filteredRowCount,
-              })}
-            </span>
-          ) : null}
-          {scopedRows.length > realtimeLogRows.length ? (
-            <span>
-              {t('monitoring.request_events_limit_hint', {
-                shown: realtimeLogRows.length,
-                total: scopedRows.length,
+                defaultValue: `Loaded ${requestLogRows.length} recent events out of ${filteredRowCount}.`,
               })}
             </span>
           ) : null}
         </div>
+
+        {realtimeLogRows.length > 0 ? (
+          <div className={styles.paginationBar}>
+            <span>
+              {t('monitoring.pagination_info', {
+                from: realtimeLogPagination.from,
+                to: realtimeLogPagination.to,
+                total: realtimeLogPagination.total,
+                page: realtimeLogPagination.page,
+                totalPages: realtimeLogPagination.totalPages,
+                defaultValue: `${realtimeLogPagination.from}-${realtimeLogPagination.to} / ${realtimeLogPagination.total}`,
+              })}
+            </span>
+            <div className={styles.paginationActions}>
+              <Button size="sm" variant="secondary" onClick={() => setRealtimeLogPage((page) => Math.max(1, page - 1))} disabled={!realtimeLogPagination.hasPrevious}>
+                {t('monitoring.pagination_previous')}
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => setRealtimeLogPage((page) => page + 1)} disabled={!realtimeLogPagination.hasNext}>
+                {t('monitoring.pagination_next')}
+              </Button>
+            </div>
+          </div>
+        ) : null}
 
         <div className={`${styles.tableWrapper} ${styles.tableScrollWrapper} ${styles.realtimeTableWrapper}`}>
           <table className={`${styles.table} ${styles.realtimeTable}`}>
@@ -3532,7 +3581,7 @@ export function MonitoringCenterPage() {
               </tr>
             </thead>
             <tbody>
-              {realtimeLogRows.map((row) => (
+              {realtimeLogPageRows.map((row) => (
                 <tr key={row.id} className={row.failed ? styles.logRowFailed : undefined}>
                   <td>
                     <div className={styles.primaryCell}>
@@ -3602,7 +3651,7 @@ export function MonitoringCenterPage() {
                   <td>{hasPrices ? formatUsd(row.totalCost) : '--'}</td>
                 </tr>
               ))}
-              {realtimeLogRows.length === 0 ? (
+              {realtimeLogPageRows.length === 0 ? (
                 <tr>
                   <td colSpan={11}>
                     <div className={styles.emptyTable}>

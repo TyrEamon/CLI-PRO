@@ -71,13 +71,25 @@ export type AccountInspectionDetailsOptions = {
   includeDetails?: boolean;
   resultLimit?: number;
   logLimit?: number;
+  resultPage?: number;
+  resultPageSize?: number;
+  resultFilter?: string;
+  logPage?: number;
+  logPageSize?: number;
+  logLevel?: string;
 };
 
 const buildAccountInspectionDetailParams = (options: boolean | AccountInspectionDetailsOptions = false) => {
   const normalized = typeof options === 'boolean' ? { includeDetails: options } : options;
-  const params: Record<string, number> = { details: normalized.includeDetails ? 1 : 0 };
+  const params: Record<string, number | string> = { details: normalized.includeDetails ? 1 : 0 };
   if (normalized.resultLimit !== undefined) params.result_limit = normalized.resultLimit;
   if (normalized.logLimit !== undefined) params.log_limit = normalized.logLimit;
+  if (normalized.resultPage !== undefined) params.result_page = normalized.resultPage;
+  if (normalized.resultPageSize !== undefined) params.result_page_size = normalized.resultPageSize;
+  if (normalized.resultFilter) params.result_filter = normalized.resultFilter;
+  if (normalized.logPage !== undefined) params.log_page = normalized.logPage;
+  if (normalized.logPageSize !== undefined) params.log_page_size = normalized.logPageSize;
+  if (normalized.logLevel) params.log_level = normalized.logLevel;
   return params;
 };
 
@@ -108,13 +120,13 @@ export const accountInspectionApi = {
   runNow: () => apiClient.post<AccountInspectionScheduleResponse>('/account-inspection/run', {}, {
     params: { details: 0 },
   }),
-  inspectOne: (item: AccountInspectionInspectOneItem) =>
+  inspectOne: (item: AccountInspectionInspectOneItem, options: boolean | AccountInspectionDetailsOptions = true) =>
     apiClient.post<AccountInspectionInspectOneResponse>('/account-inspection/inspect-one', { item }, {
-      params: { details: 1 },
+      params: buildAccountInspectionDetailParams(options),
     }),
-  refreshToken: (item: AccountInspectionRefreshTokenItem) =>
+  refreshToken: (item: AccountInspectionRefreshTokenItem, options: boolean | AccountInspectionDetailsOptions = true) =>
     apiClient.post<AccountInspectionRefreshTokenResponse>('/account-inspection/refresh-token', { item }, {
-      params: { details: 1 },
+      params: buildAccountInspectionDetailParams(options),
     }),
   pause: () => apiClient.post<AccountInspectionScheduleResponse>('/account-inspection/pause', {}, {
     params: { details: 0 },
@@ -125,8 +137,8 @@ export const accountInspectionApi = {
   stop: () => apiClient.post<AccountInspectionScheduleResponse>('/account-inspection/stop', {}, {
     params: { details: 0 },
   }),
-  executeActions: (items: AccountInspectionActionItem[]) =>
+  executeActions: (items: AccountInspectionActionItem[], options: boolean | AccountInspectionDetailsOptions = true) =>
     apiClient.post<AccountInspectionActionsResponse>('/account-inspection/actions', { items }, {
-      params: { details: 1 },
+      params: buildAccountInspectionDetailParams(options),
     }),
 };

@@ -44,6 +44,8 @@ const (
 	accountInspectionWebSocketPongWait      = 60 * time.Second
 	accountInspectionWebSocketPingPeriod    = 54 * time.Second
 	accountInspectionProgressBroadcastGap   = 500 * time.Millisecond
+	accountInspectionMaxResultPageSize      = 500
+	accountInspectionMaxLogPageSize         = 500
 )
 
 var accountInspectionWebSocketUpgrader = websocket.Upgrader{
@@ -207,16 +209,30 @@ type accountInspectionStatus struct {
 	Progress       accountInspectionProgress      `json:"progress"`
 	Summary        accountInspectionSummary       `json:"summary"`
 	HealthCounts   *accountInspectionHealthCounts `json:"healthCounts,omitempty"`
+	LogsPage       *accountInspectionPageInfo     `json:"logsPage,omitempty"`
+	ResultsPage    *accountInspectionPageInfo     `json:"resultsPage,omitempty"`
 	LogsLimited    bool                           `json:"logsLimited,omitempty"`
 	ResultsLimited bool                           `json:"resultsLimited,omitempty"`
 	Logs           []accountInspectionLogEntry    `json:"logs"`
 	Results        []accountInspectionResult      `json:"results"`
 }
 
+type accountInspectionPageInfo struct {
+	Page       int  `json:"page"`
+	PageSize   int  `json:"pageSize"`
+	Total      int  `json:"total"`
+	TotalPages int  `json:"totalPages"`
+	HasMore    bool `json:"hasMore"`
+}
+
 type accountInspectionSnapshotOptions struct {
 	IncludeDetails bool
-	ResultLimit    int
-	LogLimit       int
+	ResultPage     int
+	ResultPageSize int
+	ResultFilter   string
+	LogPage        int
+	LogPageSize    int
+	LogLevel       string
 }
 
 type accountInspectionHealthBucket string
@@ -229,15 +245,6 @@ const (
 	accountInspectionHealthInspectionError accountInspectionHealthBucket = "inspectionError"
 	accountInspectionHealthRecoverable     accountInspectionHealthBucket = "recoverable"
 )
-
-var accountInspectionHealthBuckets = [...]accountInspectionHealthBucket{
-	accountInspectionHealthHealthy,
-	accountInspectionHealthDisabled,
-	accountInspectionHealthAuthInvalid,
-	accountInspectionHealthQuotaExhausted,
-	accountInspectionHealthInspectionError,
-	accountInspectionHealthRecoverable,
-}
 
 type accountInspectionLogStreamMessage struct {
 	Type     accountInspectionStreamMessageType `json:"type"`
@@ -519,10 +526,22 @@ func (s *accountInspectionScheduler) snapshotWithOptions(options accountInspecti
 
 func accountInspectionRequestSnapshotOptions(c *gin.Context) accountInspectionSnapshotOptions {
 	value := strings.ToLower(strings.TrimSpace(c.Query("details")))
+	resultPageSize := parseAccountInspectionQueryInt(c, "result_page_size", 100)
+	if strings.TrimSpace(c.Query("result_page_size")) == "" {
+		resultPageSize = parseAccountInspectionQueryInt(c, "result_limit", resultPageSize)
+	}
+	logPageSize := parseAccountInspectionQueryInt(c, "log_page_size", 100)
+	if strings.TrimSpace(c.Query("log_page_size")) == "" {
+		logPageSize = parseAccountInspectionQueryInt(c, "log_limit", logPageSize)
+	}
 	return accountInspectionSnapshotOptions{
 		IncludeDetails: value != "0" && value != "false" && value != "summary",
-		ResultLimit:    parseAccountInspectionQueryInt(c, "result_limit", 0),
-		LogLimit:       parseAccountInspectionQueryInt(c, "log_limit", 0),
+		ResultPage:     parseAccountInspectionQueryInt(c, "result_page", 1),
+		ResultPageSize: resultPageSize,
+		ResultFilter:   strings.ToLower(strings.TrimSpace(c.Query("result_filter"))),
+		LogPage:        parseAccountInspectionQueryInt(c, "log_page", 1),
+		LogPageSize:    logPageSize,
+		LogLevel:       strings.ToLower(strings.TrimSpace(c.Query("log_level"))),
 	}
 }
 
@@ -611,11 +630,26 @@ func isAccountErrorStatusPtr(status *int) bool {
 	return status != nil && isAccountErrorStatus(*status)
 }
 
-func limitAccountInspectionLogs(logs []accountInspectionLogEntry, limit int) ([]accountInspectionLogEntry, bool) {
-	if limit > 0 && len(logs) > limit {
-		return append([]accountInspectionLogEntry(nil), logs[len(logs)-limit:]...), true
+func accountInspectionResultMatchesFilter(result accountInspectionResult, filter string) bool {
+	filter = strings.ToLower(strings.TrimSpace(filter))
+	switch filter {
+	case "", "all":
+		return true
+	case "pending":
+		return result.Action != accountInspectionActionKeep && !result.Executed
+	case "accountinvalid", "account-invalid", "account_invalid", "authinvalid", "auth-invalid", "auth_invalid":
+		return accountInspectionResultHealthBucketOf(result) == accountInspectionHealthAuthInvalid
+	case "requesterror", "request-error", "request_error", "inspectionerror", "inspection-error", "inspection_error":
+		return accountInspectionResultHealthBucketOf(result) == accountInspectionHealthInspectionError
+	case "quotaexhausted", "quota-exhausted", "quota_exhausted":
+		return accountInspectionResultHealthBucketOf(result) == accountInspectionHealthQuotaExhausted
+	case "recoverable":
+		return accountInspectionResultHealthBucketOf(result) == accountInspectionHealthRecoverable
+	case "highavailable", "high-available", "high_available", "healthy":
+		return accountInspectionResultHealthBucketOf(result) == accountInspectionHealthHealthy
+	default:
+		return true
 	}
-	return append([]accountInspectionLogEntry(nil), logs...), false
 }
 
 func minInt(left int, right int) int {
@@ -632,94 +666,100 @@ func maxInt(left int, right int) int {
 	return right
 }
 
-func accountInspectionHealthBucketTotal(counts accountInspectionHealthCounts, bucket accountInspectionHealthBucket) int {
-	switch bucket {
-	case accountInspectionHealthAuthInvalid:
-		return counts.AuthInvalid
-	case accountInspectionHealthInspectionError:
-		return counts.InspectionError
-	case accountInspectionHealthQuotaExhausted:
-		return counts.QuotaExhausted
-	case accountInspectionHealthRecoverable:
-		return counts.Recoverable
-	case accountInspectionHealthDisabled:
-		return counts.Disabled
-	default:
-		return counts.Healthy
+func normalizeAccountInspectionPage(page int) int {
+	if page <= 0 {
+		return 1
+	}
+	return page
+}
+
+func normalizeAccountInspectionPageSize(size int, fallback int, maxSize int) int {
+	if size <= 0 {
+		size = fallback
+	}
+	if size > maxSize {
+		return maxSize
+	}
+	return size
+}
+
+func accountInspectionPageInfoFor(total int, page int, pageSize int) accountInspectionPageInfo {
+	page = normalizeAccountInspectionPage(page)
+	if pageSize <= 0 {
+		pageSize = 1
+	}
+	totalPages := 0
+	if total > 0 {
+		totalPages = (total + pageSize - 1) / pageSize
+	}
+	start := (page - 1) * pageSize
+	return accountInspectionPageInfo{
+		Page:       page,
+		PageSize:   pageSize,
+		Total:      total,
+		TotalPages: totalPages,
+		HasMore:    start+pageSize < total,
 	}
 }
 
-func accountInspectionPendingActionCount(summary accountInspectionSummary) int {
-	return maxInt(
-		0,
-		summary.DeleteCount+summary.DisableCount+summary.EnableCount-
-			summary.ExecutedDeleteCount-summary.ExecutedDisableCount-summary.ExecutedEnableCount,
-	)
-}
-
-func accountInspectionHealthBucketsSatisfied(counts map[accountInspectionHealthBucket]int, targets accountInspectionHealthCounts, limit int) bool {
-	for _, bucket := range accountInspectionHealthBuckets {
-		target := minInt(limit, accountInspectionHealthBucketTotal(targets, bucket))
-		if counts[bucket] < target {
-			return false
+func paginateAccountInspectionLogs(logs []accountInspectionLogEntry, page int, pageSize int, level string) ([]accountInspectionLogEntry, accountInspectionPageInfo) {
+	page = normalizeAccountInspectionPage(page)
+	pageSize = normalizeAccountInspectionPageSize(pageSize, 100, accountInspectionMaxLogPageSize)
+	filtered := make([]accountInspectionLogEntry, 0, len(logs))
+	for _, entry := range logs {
+		if level == "" || level == "all" || strings.EqualFold(entry.Level, level) {
+			filtered = append(filtered, entry)
 		}
 	}
-	return true
+	total := len(filtered)
+	info := accountInspectionPageInfoFor(total, page, pageSize)
+	if total == 0 {
+		return []accountInspectionLogEntry{}, info
+	}
+	end := total - (page-1)*pageSize
+	if end <= 0 {
+		return []accountInspectionLogEntry{}, info
+	}
+	start := maxInt(0, end-pageSize)
+	return append([]accountInspectionLogEntry(nil), filtered[start:end]...), info
 }
 
-func limitAccountInspectionResults(results []accountInspectionResult, limit int, healthCounts accountInspectionHealthCounts, pendingTarget int) ([]accountInspectionResult, bool) {
-	if limit > 0 && len(results) > limit {
-		if healthCounts.Total != len(results) {
-			healthCounts = accountInspectionResultHealthCounts(results)
+func paginateAccountInspectionResults(results []accountInspectionResult, page int, pageSize int, filter string) ([]accountInspectionResult, accountInspectionPageInfo) {
+	page = normalizeAccountInspectionPage(page)
+	pageSize = normalizeAccountInspectionPageSize(pageSize, 100, accountInspectionMaxResultPageSize)
+	filtered := make([]accountInspectionResult, 0, len(results))
+	for _, result := range results {
+		if accountInspectionResultMatchesFilter(result, filter) {
+			filtered = append(filtered, result)
 		}
-		pendingTarget = minInt(limit, maxInt(0, pendingTarget))
-		limited := make([]accountInspectionResult, 0, minInt(len(results), limit*6))
-		seen := make(map[string]struct{})
-		bucketCounts := make(map[accountInspectionHealthBucket]int)
-		pendingCount := 0
-		for _, result := range results {
-			key := result.Key
-			if key == "" {
-				key = result.Provider + "::" + result.FileName + "::" + result.AuthIndex
-			}
-			_, alreadySeen := seen[key]
-			shouldInclude := false
-			bucket := accountInspectionResultHealthBucketOf(result)
-			if bucketCounts[bucket] < limit {
-				bucketCounts[bucket]++
-				shouldInclude = true
-			}
-			if result.Action != accountInspectionActionKeep && !result.Executed && pendingCount < pendingTarget {
-				pendingCount++
-				shouldInclude = true
-			}
-			if shouldInclude && !alreadySeen {
-				seen[key] = struct{}{}
-				limited = append(limited, result)
-			}
-			if pendingCount >= pendingTarget && accountInspectionHealthBucketsSatisfied(bucketCounts, healthCounts, limit) {
-				break
-			}
-		}
-		return limited, true
 	}
-	return append([]accountInspectionResult(nil), results...), false
+	total := len(filtered)
+	info := accountInspectionPageInfoFor(total, page, pageSize)
+	start := (page - 1) * pageSize
+	if start >= total {
+		return []accountInspectionResult{}, info
+	}
+	end := minInt(total, start+pageSize)
+	return append([]accountInspectionResult(nil), filtered[start:end]...), info
 }
 
 func (s *accountInspectionScheduler) streamStatusLocked(options accountInspectionSnapshotOptions) accountInspectionStatus {
 	status := s.status
 	if options.IncludeDetails {
 		healthCounts := s.healthCountsLocked()
+		logs, logsPage := paginateAccountInspectionLogs(s.status.Logs, options.LogPage, options.LogPageSize, options.LogLevel)
+		results, resultsPage := paginateAccountInspectionResults(s.status.Results, options.ResultPage, options.ResultPageSize, options.ResultFilter)
 		status.HealthCounts = &healthCounts
-		status.Logs, status.LogsLimited = limitAccountInspectionLogs(s.status.Logs, options.LogLimit)
-		status.Results, status.ResultsLimited = limitAccountInspectionResults(
-			s.status.Results,
-			options.ResultLimit,
-			healthCounts,
-			accountInspectionPendingActionCount(s.status.Summary),
-		)
+		status.Logs = logs
+		status.Results = results
+		status.LogsPage = &logsPage
+		status.ResultsPage = &resultsPage
+		status.LogsLimited = logsPage.Total > len(logs)
+		status.ResultsLimited = resultsPage.Total > len(results)
 	} else {
 		status.HealthCounts = nil
+		status.LogsPage = nil
+		status.ResultsPage = nil
 		status.Logs = nil
 		status.Results = nil
 		status.LogsLimited = false
