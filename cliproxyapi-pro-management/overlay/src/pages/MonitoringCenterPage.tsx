@@ -3540,39 +3540,6 @@ export function MonitoringCenterPage() {
           ) : null}
         </div>
 
-        {realtimeLogPagination.totalPages > 1 ? (
-          <div className={quotaStyles.pagination}>
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => setRealtimeLogPage((page) => Math.max(1, page - 1))}
-              disabled={!realtimeLogPagination.hasPrevious}
-              aria-label={t('monitoring.previous_page')}
-            >
-              {t('monitoring.pagination_previous')}
-            </Button>
-            <div className={quotaStyles.pageInfo}>
-              {t('monitoring.pagination_info', {
-                from: realtimeLogPagination.from,
-                to: realtimeLogPagination.to,
-                total: realtimeLogPagination.total,
-                page: realtimeLogPagination.page,
-                totalPages: realtimeLogPagination.totalPages,
-                defaultValue: `${realtimeLogPagination.from}-${realtimeLogPagination.to} / ${realtimeLogPagination.total}`,
-              })}
-            </div>
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => setRealtimeLogPage((page) => page + 1)}
-              disabled={!realtimeLogPagination.hasNext}
-              aria-label={t('monitoring.next_page')}
-            >
-              {t('monitoring.pagination_next')}
-            </Button>
-          </div>
-        ) : null}
-
         <div className={`${styles.tableWrapper} ${styles.tableScrollWrapper} ${styles.realtimeTableWrapper}`}>
           <table className={`${styles.table} ${styles.realtimeTable}`}>
             <thead>
@@ -3673,6 +3640,38 @@ export function MonitoringCenterPage() {
             </tbody>
           </table>
         </div>
+        {realtimeLogPagination.totalPages > 1 ? (
+          <div className={quotaStyles.pagination}>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setRealtimeLogPage((page) => Math.max(1, page - 1))}
+              disabled={!realtimeLogPagination.hasPrevious}
+              aria-label={t('monitoring.previous_page')}
+            >
+              {t('monitoring.previous_page')}
+            </Button>
+            <div className={quotaStyles.pageInfo}>
+              {t('monitoring.pagination_info', {
+                from: realtimeLogPagination.from,
+                to: realtimeLogPagination.to,
+                total: realtimeLogPagination.total,
+                page: realtimeLogPagination.page,
+                totalPages: realtimeLogPagination.totalPages,
+                defaultValue: `${realtimeLogPagination.from}-${realtimeLogPagination.to} / ${realtimeLogPagination.total}`,
+              })}
+            </div>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setRealtimeLogPage((page) => page + 1)}
+              disabled={!realtimeLogPagination.hasNext}
+              aria-label={t('monitoring.next_page')}
+            >
+              {t('monitoring.next_page')}
+            </Button>
+          </div>
+        ) : null}
         </Card>
       </section>
 

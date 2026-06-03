@@ -2938,7 +2938,7 @@ export function AccountInspectionPage() {
                   disabled={!resultPagination.hasPrevious}
                   aria-label={t('monitoring.previous_page')}
                 >
-                  {t('monitoring.pagination_previous')}
+                  {t('monitoring.previous_page')}
                 </Button>
                 <div className={quotaStyles.pageInfo}>
                   {t('monitoring.pagination_info', {
@@ -2957,7 +2957,7 @@ export function AccountInspectionPage() {
                   disabled={!resultPagination.hasNext}
                   aria-label={t('monitoring.next_page')}
                 >
-                  {t('monitoring.pagination_next')}
+                  {t('monitoring.next_page')}
                 </Button>
               </div>
             ) : null}
@@ -2995,6 +2995,12 @@ export function AccountInspectionPage() {
         <Card className={styles.panel}>
           {!logsCollapsed ? (
             <div ref={logListRef} className={styles.logList}>
+              {filteredLogs.length > 0 ? visibleLogs.map((entry) => (
+                <div key={entry.id} className={`${styles.logRow} ${levelClassMap[entry.level]}`}>
+                  <span className={styles.logTime}>{formatTimestamp(entry.timestamp, i18n.language)}</span>
+                  <span className={styles.logMessage}>{entry.message}</span>
+                </div>
+              )) : <div className={styles.emptyBlock}>{t('monitoring.account_inspection_logs_empty')}</div>}
               {logPagination.totalPages > 1 ? (
                 <div className={quotaStyles.pagination}>
                   <Button
@@ -3004,7 +3010,7 @@ export function AccountInspectionPage() {
                     disabled={!logPagination.hasPrevious}
                     aria-label={t('monitoring.previous_page')}
                   >
-                    {t('monitoring.pagination_previous')}
+                    {t('monitoring.previous_page')}
                   </Button>
                   <div className={quotaStyles.pageInfo}>
                     {t('monitoring.pagination_info', {
@@ -3023,16 +3029,10 @@ export function AccountInspectionPage() {
                     disabled={!logPagination.hasNext}
                     aria-label={t('monitoring.next_page')}
                   >
-                    {t('monitoring.pagination_next')}
+                    {t('monitoring.next_page')}
                   </Button>
                 </div>
               ) : null}
-              {filteredLogs.length > 0 ? visibleLogs.map((entry) => (
-                <div key={entry.id} className={`${styles.logRow} ${levelClassMap[entry.level]}`}>
-                  <span className={styles.logTime}>{formatTimestamp(entry.timestamp, i18n.language)}</span>
-                  <span className={styles.logMessage}>{entry.message}</span>
-                </div>
-              )) : <div className={styles.emptyBlock}>{t('monitoring.account_inspection_logs_empty')}</div>}
             </div>
           ) : (
             <div className={styles.logCollapsedBar}><span>{t('monitoring.account_inspection_logs_collapsed', { count: filteredLogs.length })}</span></div>
