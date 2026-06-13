@@ -12,10 +12,18 @@ PRO_PANEL_RELEASE_API = 'https://api.github.com/repos/ssfun/CLIProxyAPI-Pro/rele
 _writes = {}
 
 
+def read_text(path: Path) -> str:
+    return path.read_text(encoding='utf-8')
+
+
+def write_text(path: Path, text: str) -> None:
+    path.write_text(text, encoding='utf-8')
+
+
 def read(path: Path) -> str:
     if path in _writes:
         return _writes[path]
-    return path.read_text()
+    return read_text(path)
 
 
 def write(path: Path, text: str) -> None:
@@ -23,7 +31,7 @@ def write(path: Path, text: str) -> None:
 
 
 def module_path() -> str:
-    match = re.search(r'^module\s+(\S+)', (ROOT / 'go.mod').read_text(), re.MULTILINE)
+    match = re.search(r'^module\s+(\S+)', read_text(ROOT / 'go.mod'), re.MULTILINE)
     if not match:
         raise SystemExit(f'module path not found in {ROOT / "go.mod"}')
     return match.group(1)
@@ -41,7 +49,7 @@ def rewrite_module_imports(path: Path) -> None:
 
 def flush_writes() -> None:
     for path, text in _writes.items():
-        path.write_text(text)
+        write_text(path, text)
 
 
 def replace_once(path: Path, old: str, new: str) -> None:
@@ -203,10 +211,10 @@ management_scheduler_test = ROOT / 'internal/api/handlers/management/account_ins
 scheduler_source = Path('/tmp/account_inspection_scheduler.go')
 if not scheduler_source.is_file():
     scheduler_source = Path(__file__).resolve().parent / 'account_inspection_scheduler.go'
-management_scheduler.write_text(re.sub(r'github\.com/router-for-me/CLIProxyAPI/v\d+', MODULE_PATH, scheduler_source.read_text()))
+write_text(management_scheduler, re.sub(r'github\.com/router-for-me/CLIProxyAPI/v\d+', MODULE_PATH, read_text(scheduler_source)))
 scheduler_test_source = Path(__file__).resolve().parent / 'account_inspection_scheduler_test.go'
 if scheduler_test_source.is_file():
-    management_scheduler_test.write_text(re.sub(r'github\.com/router-for-me/CLIProxyAPI/v\d+', MODULE_PATH, scheduler_test_source.read_text()))
+    write_text(management_scheduler_test, re.sub(r'github\.com/router-for-me/CLIProxyAPI/v\d+', MODULE_PATH, read_text(scheduler_test_source)))
 replace_once(
     auth_files,
     '''		"unavailable":    auth.Unavailable,
@@ -300,8 +308,8 @@ for embeddedusage_file in embeddedusage_target.rglob('*.go'):
 
 redisqueue_plugin = ROOT / 'internal/redisqueue/plugin.go'
 redisqueue_usage_toggle = ROOT / 'internal/redisqueue/usage_toggle.go'
-redisqueue_plugin.write_text(re.sub(r'github\.com/router-for-me/CLIProxyAPI/v\d+', MODULE_PATH, (patch_dir / 'redisqueue_plugin.go').read_text()))
-redisqueue_usage_toggle.write_text((patch_dir / 'redisqueue_usage_toggle.go').read_text())
+write_text(redisqueue_plugin, re.sub(r'github\.com/router-for-me/CLIProxyAPI/v\d+', MODULE_PATH, read_text(patch_dir / 'redisqueue_plugin.go')))
+write_text(redisqueue_usage_toggle, read_text(patch_dir / 'redisqueue_usage_toggle.go'))
 
 add_go_import(server, '"' + import_path('internal/config') + '"\n', '\t"' + import_path('internal/embeddedusage') + '"\n')
 
@@ -425,7 +433,7 @@ insert_before_nth(
     'embeddedusage.Start(runCtx)',
 )
 
-(ROOT / 'sdk/cliproxy/auth/inspection_refresh.go').write_text('''package auth
+write_text(ROOT / 'sdk/cliproxy/auth/inspection_refresh.go', '''package auth
 
 import (
 	"context"
