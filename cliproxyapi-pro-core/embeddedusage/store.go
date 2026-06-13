@@ -26,6 +26,40 @@ type UsageSummary struct {
 	TotalTokens   int64
 }
 
+type UsageAggregateBucket struct {
+	BucketStartMS   int64  `json:"bucketStartMs"`
+	BucketStart     string `json:"bucketStart"`
+	Provider        string `json:"provider,omitempty"`
+	Model           string `json:"model,omitempty"`
+	Endpoint        string `json:"endpoint,omitempty"`
+	APIKeyHash      string `json:"apiKeyHash,omitempty"`
+	TotalRequests   int64  `json:"totalRequests"`
+	SuccessCount    int64  `json:"successCount"`
+	FailureCount    int64  `json:"failureCount"`
+	TotalTokens     int64  `json:"totalTokens"`
+	InputTokens     int64  `json:"inputTokens"`
+	OutputTokens    int64  `json:"outputTokens"`
+	ReasoningTokens int64  `json:"reasoningTokens"`
+	CacheTokens     int64  `json:"cacheTokens"`
+	AvgLatencyMS    *int64 `json:"avgLatencyMs,omitempty"`
+	AvgTTFTMS       *int64 `json:"avgTtftMs,omitempty"`
+}
+
+type UsageAggregateOptions struct {
+	FromMS   int64
+	ToMS     int64
+	Interval string
+	GroupBy  []string
+	Limit    int
+}
+
+type DeadLetterSample struct {
+	ID          int64  `json:"id"`
+	Error       string `json:"error"`
+	Payload     string `json:"payload"`
+	CreatedAtMS int64  `json:"createdAtMs"`
+}
+
 type usageSummarySnapshot struct {
 	LatestID int64
 	Summary  UsageSummary
@@ -163,6 +197,12 @@ func (s *Store) init() error {
 			cache_tokens integer not null default 0,
 			total_tokens integer not null default 0,
 			latency_ms integer,
+			ttft_ms integer,
+			status_code integer,
+			error_code text,
+			error_message text,
+			reasoning_effort text,
+			service_tier text,
 			failed integer not null default 0,
 			raw_json text,
 			created_at_ms integer not null
@@ -217,6 +257,18 @@ func (s *Store) init() error {
 			return err
 		}
 	}
+	for _, statement := range []string{
+		`alter table usage_events add column ttft_ms integer`,
+		`alter table usage_events add column status_code integer`,
+		`alter table usage_events add column error_code text`,
+		`alter table usage_events add column error_message text`,
+		`alter table usage_events add column reasoning_effort text`,
+		`alter table usage_events add column service_tier text`,
+	} {
+		if _, err := s.db.Exec(statement); err != nil && !isDuplicateColumnError(err) {
+			return err
+		}
+	}
 	return s.ensureUsageSummary()
 }
 
@@ -234,8 +286,9 @@ func (s *Store) InsertEvents(ctx context.Context, events []internalusage.Event) 
 		request_id, event_hash, timestamp_ms, timestamp, provider, model, endpoint, method, path,
 		auth_type, auth_index, source, source_hash, api_key_hash,
 		input_tokens, output_tokens, reasoning_tokens, cached_tokens, cache_tokens, total_tokens,
-		latency_ms, failed, raw_json, created_at_ms
-	) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		latency_ms, ttft_ms, status_code, error_code, error_message, reasoning_effort, service_tier,
+		failed, raw_json, created_at_ms
+	) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return InsertResult{}, err
 	}
@@ -254,7 +307,8 @@ func (s *Store) InsertEvents(ctx context.Context, events []internalusage.Event) 
 			nullString(event.Provider), event.Model, nullString(event.Endpoint), nullString(event.Method), nullString(event.Path),
 			nullString(event.AuthType), nullString(event.AuthIndex), nullString(event.Source), nullString(event.SourceHash), nullString(event.APIKeyHash),
 			event.InputTokens, event.OutputTokens, event.ReasoningTokens, event.CachedTokens, event.CacheTokens, event.TotalTokens,
-			nullInt(event.LatencyMS), failed, nullString(event.RawJSON), event.CreatedAtMS,
+			nullInt64(event.LatencyMS), nullInt64(event.TTFTMS), nullInt(event.StatusCode), nullString(event.ErrorCode), nullString(event.ErrorMessage), nullString(event.ReasoningEffort), nullString(event.ServiceTier),
+			failed, nullString(event.RawJSON), event.CreatedAtMS,
 		)
 		if err != nil {
 			return InsertResult{}, err
@@ -410,13 +464,15 @@ func (s *Store) scanEvents(rows *sql.Rows) ([]internalusage.Event, error) {
 	for rows.Next() {
 		var event internalusage.Event
 		var requestID, provider, endpoint, method, path, authType, authIndex, source, sourceHash, apiKeyHash, rawJSON sql.NullString
-		var latency sql.NullInt64
+		var latency, ttft sql.NullInt64
+		var statusCode sql.NullInt64
+		var errorCode, errorMessage, reasoningEffort, serviceTier sql.NullString
 		var failed int
 		if err := rows.Scan(
 			&event.ID, &requestID, &event.EventHash, &event.TimestampMS, &event.Timestamp, &provider, &event.Model,
 			&endpoint, &method, &path, &authType, &authIndex, &source, &sourceHash, &apiKeyHash,
 			&event.InputTokens, &event.OutputTokens, &event.ReasoningTokens, &event.CachedTokens, &event.CacheTokens, &event.TotalTokens,
-			&latency, &failed, &rawJSON, &event.CreatedAtMS,
+			&latency, &ttft, &statusCode, &errorCode, &errorMessage, &reasoningEffort, &serviceTier, &failed, &rawJSON, &event.CreatedAtMS,
 		); err != nil {
 			return nil, err
 		}
@@ -436,6 +492,18 @@ func (s *Store) scanEvents(rows *sql.Rows) ([]internalusage.Event, error) {
 			value := latency.Int64
 			event.LatencyMS = &value
 		}
+		if ttft.Valid {
+			value := ttft.Int64
+			event.TTFTMS = &value
+		}
+		if statusCode.Valid {
+			value := int(statusCode.Int64)
+			event.StatusCode = &value
+		}
+		event.ErrorCode = errorCode.String
+		event.ErrorMessage = errorMessage.String
+		event.ReasoningEffort = reasoningEffort.String
+		event.ServiceTier = serviceTier.String
 		events = append(events, event)
 	}
 	return events, rows.Err()
@@ -449,7 +517,8 @@ func (s *Store) RecentEvents(ctx context.Context, limit int) ([]internalusage.Ev
 		id, request_id, event_hash, timestamp_ms, timestamp, provider, model, endpoint, method, path,
 		auth_type, auth_index, source, source_hash, api_key_hash,
 		input_tokens, output_tokens, reasoning_tokens, cached_tokens, cache_tokens, total_tokens,
-		latency_ms, failed, raw_json, created_at_ms
+		latency_ms, ttft_ms, status_code, error_code, error_message, reasoning_effort, service_tier,
+		failed, raw_json, created_at_ms
 		from usage_events indexed by idx_usage_events_recent
 		order by timestamp_ms desc, id desc
 		limit ?`, limit)
@@ -468,7 +537,8 @@ func (s *Store) EventsAfter(ctx context.Context, afterID int64, limit int) ([]in
 		id, request_id, event_hash, timestamp_ms, timestamp, provider, model, endpoint, method, path,
 		auth_type, auth_index, source, source_hash, api_key_hash,
 		input_tokens, output_tokens, reasoning_tokens, cached_tokens, cache_tokens, total_tokens,
-		latency_ms, failed, raw_json, created_at_ms
+		latency_ms, ttft_ms, status_code, error_code, error_message, reasoning_effort, service_tier,
+		failed, raw_json, created_at_ms
 		from usage_events
 		where id > ?
 		order by id asc
@@ -586,6 +656,215 @@ func (s *Store) Counts(ctx context.Context) (events int64, deadLetters int64, er
 		return 0, 0, err
 	}
 	return events, deadLetters, nil
+}
+
+func (s *Store) RecentDeadLetters(ctx context.Context, limit int) ([]DeadLetterSample, error) {
+	if limit <= 0 || limit > 20 {
+		limit = 5
+	}
+	rows, err := s.db.QueryContext(ctx, `select id, error, payload, created_at_ms from dead_letter_events order by id desc limit ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	samples := make([]DeadLetterSample, 0)
+	for rows.Next() {
+		var sample DeadLetterSample
+		if err := rows.Scan(&sample.ID, &sample.Error, &sample.Payload, &sample.CreatedAtMS); err != nil {
+			return nil, err
+		}
+		sample.Payload = redactDeadLetterPayload(sample.Payload)
+		if len(sample.Payload) > 500 {
+			sample.Payload = sample.Payload[:500]
+		}
+		samples = append(samples, sample)
+	}
+	return samples, rows.Err()
+}
+
+func redactDeadLetterPayload(payload string) string {
+	payload = strings.TrimSpace(payload)
+	if payload == "" {
+		return ""
+	}
+	var value any
+	if err := json.Unmarshal([]byte(payload), &value); err != nil {
+		return payload
+	}
+	redacted, err := json.Marshal(redactDeadLetterValue(value))
+	if err != nil {
+		return payload
+	}
+	return string(redacted)
+}
+
+func redactDeadLetterValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, child := range typed {
+			if isDeadLetterSecretKey(key) {
+				out[key] = "[redacted]"
+			} else {
+				out[key] = redactDeadLetterValue(child)
+			}
+		}
+		return out
+	case []any:
+		out := make([]any, 0, len(typed))
+		for _, child := range typed {
+			out = append(out, redactDeadLetterValue(child))
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+func isDeadLetterSecretKey(key string) bool {
+	normalized := strings.ToLower(strings.ReplaceAll(key, "-", "_"))
+	return normalized == "api_key" ||
+		normalized == "apikey" ||
+		normalized == "authorization" ||
+		normalized == "cookie" ||
+		normalized == "set_cookie" ||
+		normalized == "access_token" ||
+		normalized == "refresh_token" ||
+		normalized == "token" ||
+		strings.Contains(normalized, "secret")
+}
+
+func (s *Store) UsageAggregates(ctx context.Context, options UsageAggregateOptions) ([]UsageAggregateBucket, error) {
+	intervalMs := aggregateIntervalMS(options.Interval)
+	if intervalMs <= 0 {
+		intervalMs = int64(time.Hour / time.Millisecond)
+	}
+	if options.Limit <= 0 || options.Limit > 2000 {
+		options.Limit = 1000
+	}
+	selects := []string{`(timestamp_ms / ?) * ? as bucket_start_ms`}
+	groups := []string{`bucket_start_ms`}
+	args := []any{intervalMs, intervalMs}
+	for _, group := range normalizeAggregateGroups(options.GroupBy) {
+		selects = append(selects, group)
+		groups = append(groups, group)
+	}
+	selects = append(selects,
+		`count(*) as total_requests`,
+		`coalesce(sum(case when failed = 0 then 1 else 0 end), 0) as success_count`,
+		`coalesce(sum(case when failed != 0 then 1 else 0 end), 0) as failure_count`,
+		`coalesce(sum(total_tokens), 0) as total_tokens`,
+		`coalesce(sum(input_tokens), 0) as input_tokens`,
+		`coalesce(sum(output_tokens), 0) as output_tokens`,
+		`coalesce(sum(reasoning_tokens), 0) as reasoning_tokens`,
+		`coalesce(sum(max(cached_tokens, cache_tokens)), 0) as cache_tokens`,
+		`cast(avg(latency_ms) as integer) as avg_latency_ms`,
+		`cast(avg(ttft_ms) as integer) as avg_ttft_ms`,
+	)
+	query := `select ` + strings.Join(selects, ", ") + ` from usage_events`
+	wheres := []string{}
+	if options.FromMS > 0 {
+		wheres = append(wheres, `timestamp_ms >= ?`)
+		args = append(args, options.FromMS)
+	}
+	if options.ToMS > 0 {
+		wheres = append(wheres, `timestamp_ms <= ?`)
+		args = append(args, options.ToMS)
+	}
+	if len(wheres) > 0 {
+		query += ` where ` + strings.Join(wheres, ` and `)
+	}
+	query += ` group by ` + strings.Join(groups, ", ") + ` order by bucket_start_ms asc limit ?`
+	args = append(args, options.Limit)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	buckets := make([]UsageAggregateBucket, 0)
+	groupColumns := normalizeAggregateGroups(options.GroupBy)
+	for rows.Next() {
+		var bucket UsageAggregateBucket
+		dest := []any{&bucket.BucketStartMS}
+		groupValues := make([]sql.NullString, len(groupColumns))
+		for index, group := range groupColumns {
+			switch group {
+			case "provider", "model", "endpoint", "api_key_hash":
+				dest = append(dest, &groupValues[index])
+			}
+		}
+		var avgLatency, avgTTFT sql.NullInt64
+		dest = append(dest, &bucket.TotalRequests, &bucket.SuccessCount, &bucket.FailureCount, &bucket.TotalTokens, &bucket.InputTokens, &bucket.OutputTokens, &bucket.ReasoningTokens, &bucket.CacheTokens, &avgLatency, &avgTTFT)
+		if err := rows.Scan(dest...); err != nil {
+			return nil, err
+		}
+		for index, group := range groupColumns {
+			value := groupValues[index].String
+			switch group {
+			case "provider":
+				bucket.Provider = value
+			case "model":
+				bucket.Model = value
+			case "endpoint":
+				bucket.Endpoint = value
+			case "api_key_hash":
+				bucket.APIKeyHash = value
+			}
+		}
+		bucket.BucketStart = time.UnixMilli(bucket.BucketStartMS).UTC().Format(time.RFC3339Nano)
+		if avgLatency.Valid {
+			value := avgLatency.Int64
+			bucket.AvgLatencyMS = &value
+		}
+		if avgTTFT.Valid {
+			value := avgTTFT.Int64
+			bucket.AvgTTFTMS = &value
+		}
+		buckets = append(buckets, bucket)
+	}
+	return buckets, rows.Err()
+}
+
+func aggregateIntervalMS(interval string) int64 {
+	switch strings.ToLower(strings.TrimSpace(interval)) {
+	case "minute", "1m":
+		return int64(time.Minute / time.Millisecond)
+	case "day", "1d":
+		return int64(24 * time.Hour / time.Millisecond)
+	default:
+		return int64(time.Hour / time.Millisecond)
+	}
+}
+
+func normalizeAggregateGroups(groups []string) []string {
+	allowed := map[string]string{
+		"provider":     "provider",
+		"model":        "model",
+		"endpoint":     "endpoint",
+		"api_key_hash": "api_key_hash",
+		"apiKeyHash":   "api_key_hash",
+	}
+	out := make([]string, 0, len(groups))
+	seen := map[string]struct{}{}
+	for _, group := range groups {
+		normalized, ok := allowed[strings.TrimSpace(group)]
+		if !ok {
+			continue
+		}
+		if _, exists := seen[normalized]; exists {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		out = append(out, normalized)
+	}
+	return out
+}
+
+func isDuplicateColumnError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "duplicate column")
 }
 
 func (s *Store) ExportJSONL(ctx context.Context) ([]byte, error) {
@@ -978,7 +1257,14 @@ func nullString(value string) any {
 	return value
 }
 
-func nullInt(value *int64) any {
+func nullInt(value *int) any {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+func nullInt64(value *int64) any {
 	if value == nil {
 		return nil
 	}

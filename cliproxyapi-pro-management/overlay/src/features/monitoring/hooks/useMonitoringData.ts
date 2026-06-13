@@ -322,6 +322,12 @@ export type MonitoringEventRow = {
   failed: boolean;
   statsIncluded: boolean;
   latencyMs: number | null;
+  ttftMs: number | null;
+  statusCode: number | null;
+  errorCode: string;
+  errorMessage: string;
+  reasoningEffort: string;
+  serviceTier: string;
   inputTokens: number;
   outputTokens: number;
   reasoningTokens: number;
@@ -1218,6 +1224,12 @@ const buildEventRows = (
       failed: detail.failed === true,
       statsIncluded,
       latencyMs: typeof detail.latency_ms === 'number' ? detail.latency_ms : null,
+      ttftMs: typeof detail.ttft_ms === 'number' ? detail.ttft_ms : null,
+      statusCode: typeof detail.status_code === 'number' ? detail.status_code : null,
+      errorCode: detail.error_code || '',
+      errorMessage: detail.error_message || '',
+      reasoningEffort: detail.reasoning_effort || '',
+      serviceTier: detail.service_tier || '',
       inputTokens,
       outputTokens,
       reasoningTokens,

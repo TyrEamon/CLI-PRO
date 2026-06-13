@@ -147,3 +147,57 @@ func TestLoadUsageEventPageUsesSentinelForStreamBatches(t *testing.T) {
 		t.Fatalf("payload = %+v, want details 2/2/true latest_id=2", payload)
 	}
 }
+
+func TestHandleUsageAggregatesReturnsBuckets(t *testing.T) {
+	store := openTestStore(t)
+	insertTestUsageEvents(t, store,
+		testUsageEvent(0, false, 10),
+		testUsageEvent(1, true, 20),
+	)
+	router := testUsageRouter(store)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/usage/aggregates?interval=hour&group_by=provider,model&limit=10", nil)
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		Items []UsageAggregateBucket `json:"items"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(payload.Items) != 1 {
+		t.Fatalf("aggregate items len = %d, want 1", len(payload.Items))
+	}
+	item := payload.Items[0]
+	if item.Provider != "test" || item.Model != "model" || item.TotalRequests != 2 || item.FailureCount != 1 || item.TotalTokens != 30 {
+		t.Fatalf("aggregate item = %+v, want totals by provider/model", item)
+	}
+}
+
+func TestHandleStatusIncludesDeadLetterSamples(t *testing.T) {
+	store := openTestStore(t)
+	if err := store.AddDeadLetter(context.Background(), "bad payload", errTestParse); err != nil {
+		t.Fatalf("AddDeadLetter() error = %v", err)
+	}
+	router := testUsageRouter(store)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/usage/status", nil)
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		DeadLetters       int64              `json:"deadLetters"`
+		DeadLetterSamples []DeadLetterSample `json:"deadLetterSamples"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.DeadLetters != 1 || len(payload.DeadLetterSamples) != 1 || payload.DeadLetterSamples[0].Error == "" {
+		t.Fatalf("status payload = %+v, want dead letter sample", payload)
+	}
+}

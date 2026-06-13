@@ -205,6 +205,7 @@ These frontend customizations expect the customized `cliproxyapi-pro-core` backe
 - `/v0/management/usage`
 - `/v0/management/usage/status`
 - `/v0/management/usage/events`
+- `/v0/management/usage/aggregates`
 - `/v0/management/usage/stream`
 - `/v0/management/usage/export`
 - `/v0/management/usage/import`

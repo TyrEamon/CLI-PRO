@@ -41,6 +41,7 @@ The embedded service exposes these management routes:
 
 - `GET /v0/management/usage` — aggregated usage payload for the management UI.
 - `GET /v0/management/usage/events` — incremental usage events after a cursor.
+- `GET /v0/management/usage/aggregates` — aggregate usage by time bucket and provider/model/endpoint/API key.
 - `GET /v0/management/usage/stream` — SSE stream for live usage updates.
 - `GET /v0/management/usage/export` — JSONL/NDJSON export.
 - `POST /v0/management/usage/import` — JSONL/NDJSON import.
@@ -100,6 +101,8 @@ The management UI reads and writes this cache through `/usage/quota-cache`, so q
 ### Backend account inspection scheduler
 
 The patch layer adds backend account-inspection routes under the management API:
+
+Request monitoring also stores TTFT, HTTP status code, structured error, reasoning effort, and service tier. `/usage/status` returns recent dead-letter samples with sensitive fields redacted. Account-inspection automatic actions support consecutive-confirmation gating, and quota cache entries include parser version plus response-shape hashes.
 
 - `GET /v0/management/account-inspection/schedule`
 - `GET /v0/management/account-inspection/status`

@@ -3,7 +3,9 @@ package management
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,6 +48,7 @@ const (
 	accountInspectionProgressBroadcastGap   = 500 * time.Millisecond
 	accountInspectionMaxResultPageSize      = 500
 	accountInspectionMaxLogPageSize         = 500
+	accountInspectionQuotaParserVersion     = 2
 )
 
 var accountInspectionWebSocketUpgrader = websocket.Upgrader{
@@ -79,6 +82,7 @@ type accountInspectionSettings struct {
 	AutoExecuteAccountInvalidAction accountInspectionAction               `json:"autoExecuteAccountInvalidAction"`
 	AutoExecuteRequestErrorAction   accountInspectionAction               `json:"autoExecuteRequestErrorAction"`
 	AutoExecuteAccountErrorAction   accountInspectionAction               `json:"autoExecuteAccountErrorAction,omitempty"`
+	AutoExecuteConfirmations        int                                   `json:"autoExecuteConfirmations,omitempty"`
 }
 
 type accountInspectionSchedule struct {
@@ -263,6 +267,7 @@ type accountInspectionScheduler struct {
 	schedule                accountInspectionSchedule
 	status                  accountInspectionStatus
 	healthCounts            accountInspectionHealthCounts
+	autoActionConfirmations map[string]int
 	subscribers             map[chan accountInspectionLogStreamMessage]struct{}
 	lastProgressBroadcastAt int64
 }
@@ -358,10 +363,11 @@ func schedulerForHandler(h *Handler) *accountInspectionScheduler {
 
 func newAccountInspectionScheduler(h *Handler) *accountInspectionScheduler {
 	scheduler := &accountInspectionScheduler{
-		h:           h,
-		path:        accountInspectionSchedulePath(),
-		trigger:     make(chan struct{}, 1),
-		subscribers: make(map[chan accountInspectionLogStreamMessage]struct{}),
+		h:                       h,
+		path:                    accountInspectionSchedulePath(),
+		trigger:                 make(chan struct{}, 1),
+		subscribers:             make(map[chan accountInspectionLogStreamMessage]struct{}),
+		autoActionConfirmations: make(map[string]int),
 		schedule: accountInspectionSchedule{
 			Enabled:         false,
 			IntervalMinutes: accountInspectionDefaultIntervalMin,
@@ -401,6 +407,7 @@ func defaultAccountInspectionSettings() accountInspectionSettings {
 		AutoExecuteQuotaRecoveryEnable:  false,
 		AutoExecuteAccountInvalidAction: accountInspectionActionNone,
 		AutoExecuteRequestErrorAction:   accountInspectionActionNone,
+		AutoExecuteConfirmations:        1,
 	}
 }
 
@@ -449,6 +456,12 @@ func normalizeAccountInspectionSchedule(input accountInspectionSchedule) account
 	}
 	if settings.SampleSize < 0 {
 		settings.SampleSize = 0
+	}
+	if settings.AutoExecuteConfirmations <= 0 {
+		settings.AutoExecuteConfirmations = defaults.AutoExecuteConfirmations
+	}
+	if settings.AutoExecuteConfirmations > 5 {
+		settings.AutoExecuteConfirmations = 5
 	}
 	settings.AntigravityDeepProbeModel = strings.TrimSpace(settings.AntigravityDeepProbeModel)
 	if settings.AntigravityDeepProbeModel == "" {
@@ -1830,7 +1843,7 @@ func (s *accountInspectionScheduler) inspectAntigravity(ctx context.Context, acc
 		if err != nil {
 			continue
 		}
-		s.persistQuotaState(ctx, account, quotaSuccessState(map[string]any{"groups": groups}))
+		s.persistQuotaState(ctx, account, quotaSuccessState(map[string]any{"groups": groups, "rawShapeHash": jsonShapeHash(resp.Body)}))
 		used := antigravityUsedPercent(groups, settings.AntigravityQuotaMode)
 		decision := quotaDecision(account, used, used != nil, settings.UsedPercentThreshold)
 		if settings.AntigravityDeepProbeEnabled && antigravityShouldDeepProbe(decision) {
@@ -2099,7 +2112,7 @@ func (s *accountInspectionScheduler) inspectClaude(ctx context.Context, account 
 	if profileErr == nil && profileResp.StatusCode >= 200 && profileResp.StatusCode < 300 {
 		planType = resolveClaudePlan(profileResp.Body)
 	}
-	s.persistQuotaState(ctx, account, quotaSuccessState(map[string]any{"windows": windows, "extraUsage": extraUsage, "planType": emptyStringAsNil(planType)}))
+	s.persistQuotaState(ctx, account, quotaSuccessState(map[string]any{"windows": windows, "extraUsage": extraUsage, "planType": emptyStringAsNil(planType), "rawShapeHash": jsonShapeHash(usageResp.Body)}))
 	used := maxUsedPercentFromWindows(windows)
 	return quotaDecision(account, used, len(windows) > 0, settings.UsedPercentThreshold), status, nil
 }
@@ -2127,7 +2140,7 @@ func (s *accountInspectionScheduler) inspectCodex(ctx context.Context, account a
 		isQuota = true
 	}
 	if payload != nil && len(windows) > 0 {
-		s.persistQuotaState(ctx, account, quotaSuccessState(map[string]any{"windows": windows, "planType": codexPlanType(account.Auth, payload)}))
+		s.persistQuotaState(ctx, account, quotaSuccessState(map[string]any{"windows": windows, "planType": codexPlanType(account.Auth, payload), "rawShapeHash": jsonShapeHash(resp.Body)}))
 	}
 	return codexDecision(account, resp.StatusCode, used, isQuota, settings.UsedPercentThreshold), status, nil
 }
@@ -2159,7 +2172,7 @@ func (s *accountInspectionScheduler) inspectGeminiCLI(ctx context.Context, accou
 		return accountInspectionDecision{}, status, err
 	}
 	supplementary := s.fetchGeminiCLISupplementary(ctx, account, projectID, settings)
-	s.persistQuotaState(ctx, account, quotaSuccessState(map[string]any{"buckets": buckets, "tierLabel": supplementary["tierLabel"], "tierId": supplementary["tierId"], "creditBalance": supplementary["creditBalance"]}))
+	s.persistQuotaState(ctx, account, quotaSuccessState(map[string]any{"buckets": buckets, "tierLabel": supplementary["tierLabel"], "tierId": supplementary["tierId"], "creditBalance": supplementary["creditBalance"], "rawShapeHash": jsonShapeHash(resp.Body)}))
 	return quotaDecision(account, used, len(buckets) > 0, settings.UsedPercentThreshold), status, nil
 }
 
@@ -2228,7 +2241,7 @@ func (s *accountInspectionScheduler) inspectKimi(ctx context.Context, account ac
 	if err != nil {
 		return accountInspectionDecision{}, status, err
 	}
-	s.persistQuotaState(ctx, account, quotaSuccessState(map[string]any{"rows": rows}))
+	s.persistQuotaState(ctx, account, quotaSuccessState(map[string]any{"rows": rows, "rawShapeHash": jsonShapeHash(resp.Body)}))
 	return quotaDecision(account, used, len(rows) > 0, settings.UsedPercentThreshold), status, nil
 }
 
@@ -2573,6 +2586,15 @@ func (s *accountInspectionScheduler) applyAutomaticActions(ctx context.Context, 
 	runAccountInspectionWorkers(len(results), workers, nil, func(index int) bool {
 		action := autoActionForResult(results[index], settings)
 		if action == "" {
+			s.clearAutoActionConfirmation(results[index])
+			return true
+		}
+		confirmed, count, required := s.confirmAutoAction(results[index], action, settings.AutoExecuteConfirmations)
+		if !confirmed {
+			if results[index].ActionReason != "" {
+				results[index].ActionReason += fmt.Sprintf("；等待连续确认 %d/%d 后自动执行", count, required)
+			}
+			s.appendLog("info", fmt.Sprintf("%s -> %s 等待连续确认 %d/%d", resultIdentity(results[index]), action, count, required))
 			return true
 		}
 		if action == accountInspectionActionDelete {
@@ -2593,6 +2615,7 @@ func (s *accountInspectionScheduler) applyAutomaticActions(ctx context.Context, 
 		} else {
 			results[index].Executed = true
 			results[index].Action = action
+			s.clearAutoActionConfirmation(results[index])
 			if action == accountInspectionActionDisable {
 				results[index].Disabled = true
 			}
@@ -2604,6 +2627,63 @@ func (s *accountInspectionScheduler) applyAutomaticActions(ctx context.Context, 
 		mu.Unlock()
 		return true
 	})
+}
+
+func (s *accountInspectionScheduler) confirmAutoAction(result accountInspectionResult, action accountInspectionAction, required int) (bool, int, int) {
+	if required <= 1 {
+		return true, 1, 1
+	}
+	key := autoActionConfirmationKey(result, action)
+	if key == "" {
+		return true, 1, required
+	}
+	s.mu.Lock()
+	if s.autoActionConfirmations == nil {
+		s.autoActionConfirmations = make(map[string]int)
+	}
+	count := s.autoActionConfirmations[key] + 1
+	s.autoActionConfirmations[key] = count
+	s.mu.Unlock()
+	return count >= required, count, required
+}
+
+func (s *accountInspectionScheduler) clearAutoActionConfirmation(result accountInspectionResult) {
+	keyPrefix := result.Key
+	if keyPrefix == "" {
+		keyPrefix = result.FileName + ":" + result.AuthIndex
+	}
+	if keyPrefix == "" {
+		return
+	}
+	s.mu.Lock()
+	for key := range s.autoActionConfirmations {
+		if strings.HasPrefix(key, keyPrefix+"|") {
+			delete(s.autoActionConfirmations, key)
+		}
+	}
+	s.mu.Unlock()
+}
+
+func autoActionConfirmationKey(result accountInspectionResult, action accountInspectionAction) string {
+	key := result.Key
+	if key == "" {
+		key = result.FileName + ":" + result.AuthIndex
+	}
+	if key == "" || action == "" {
+		return ""
+	}
+	category := "action"
+	switch {
+	case isAccountInspectionAccountInvalidResult(result):
+		category = "account-invalid"
+	case isAccountInspectionRequestErrorResult(result):
+		category = "request-error"
+	case result.IsQuota:
+		category = "quota"
+	case action == accountInspectionActionEnable:
+		category = "recovery"
+	}
+	return key + "|" + string(action) + "|" + category
 }
 
 func accountInspectionAutoActionForError(result accountInspectionResult, action accountInspectionAction) accountInspectionAction {
@@ -2761,11 +2841,59 @@ func resultIdentity(result accountInspectionResult) string {
 }
 
 func quotaSuccessState(values map[string]any) map[string]any {
-	state := map[string]any{"status": "success", "cachedAt": time.Now().UnixMilli()}
+	state := map[string]any{"status": "success", "schemaVersion": 2, "parserVersion": accountInspectionQuotaParserVersion, "cachedAt": time.Now().UnixMilli()}
 	for key, value := range values {
 		state[key] = value
 	}
 	return state
+}
+
+func jsonShapeHash(body string) string {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return ""
+	}
+	var payload any
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		return ""
+	}
+	shape, err := json.Marshal(jsonShape(payload))
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(shape)
+	return hex.EncodeToString(sum[:])
+}
+
+func jsonShape(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		out := make(map[string]any, len(keys))
+		for _, key := range keys {
+			out[key] = jsonShape(typed[key])
+		}
+		return out
+	case []any:
+		if len(typed) == 0 {
+			return []any{}
+		}
+		return []any{jsonShape(typed[0])}
+	case string:
+		return "string"
+	case float64:
+		return "number"
+	case bool:
+		return "bool"
+	case nil:
+		return "null"
+	default:
+		return fmt.Sprintf("%T", value)
+	}
 }
 
 func (s *accountInspectionScheduler) persistQuotaState(ctx context.Context, account accountInspectionAccount, state map[string]any) {

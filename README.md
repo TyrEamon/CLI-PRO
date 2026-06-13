@@ -114,6 +114,7 @@ CLIProxyAPI Pro 是对两个 upstream 项目的最小化定制层集合：
 /v0/management/usage
 /v0/management/usage/status
 /v0/management/usage/events
+/v0/management/usage/aggregates
 /v0/management/usage/stream
 /v0/management/usage/export
 /v0/management/usage/import
@@ -130,7 +131,9 @@ CLIProxyAPI Pro 是对两个 upstream 项目的最小化定制层集合：
 /v0/management/account-inspection/actions
 ```
 
-账号巡检只由后端执行。管理端负责配置调度、启动和控制巡检、轮询状态/进度/结果，通过 WebSocket/WSS 接收日志和实时状态，并确认手动操作。
+请求监控会保存 TTFT、HTTP 状态码、结构化错误、reasoning effort 和 service tier 等诊断字段，并提供 `/usage/aggregates` 服务端聚合接口。`/usage/status` 会返回最近 dead letter 样本，样本会做敏感字段脱敏。
+
+账号巡检只由后端执行。管理端负责配置调度、启动和控制巡检、轮询状态/进度/结果，通过 WebSocket/WSS 接收日志和实时状态，并确认手动操作。后端自动动作支持连续确认门槛，quota cache 会记录解析器版本和返回结构 hash，便于上游字段变化时排查。
 
 后端巡检时，如果认证记录本来已经进入正常刷新窗口，会在配额/账号探测前尝试刷新 token。巡检刷新路径会跳过 API key 账号、未到刷新窗口的账号，以及仍受 `NextRefreshAfter` 限制的账号；disabled 账号允许刷新。刷新成功后使用刷新后的 auth 继续探测；刷新失败时保留该账号，并跳过该账号本次探测。
 

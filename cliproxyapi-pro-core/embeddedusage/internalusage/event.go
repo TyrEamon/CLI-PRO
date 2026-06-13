@@ -34,6 +34,12 @@ type Event struct {
 	CacheTokens     int64  `json:"cache_tokens"`
 	TotalTokens     int64  `json:"total_tokens"`
 	LatencyMS       *int64 `json:"latency_ms,omitempty"`
+	TTFTMS          *int64 `json:"ttft_ms,omitempty"`
+	StatusCode      *int   `json:"status_code,omitempty"`
+	ErrorCode       string `json:"error_code,omitempty"`
+	ErrorMessage    string `json:"error_message,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	ServiceTier     string `json:"service_tier,omitempty"`
 	Failed          bool   `json:"failed"`
 	RawJSON         string `json:"raw_json,omitempty"`
 	CreatedAtMS     int64  `json:"created_at_ms"`
@@ -49,15 +55,21 @@ type Tokens struct {
 }
 
 type Detail struct {
-	Timestamp  string `json:"timestamp"`
-	Source     string `json:"source"`
-	AuthIndex  string `json:"auth_index,omitempty"`
-	APIKeyHash string `json:"api_key_hash,omitempty"`
-	Provider   string `json:"provider,omitempty"`
-	AuthType   string `json:"auth_type,omitempty"`
-	LatencyMS  *int64 `json:"latency_ms,omitempty"`
-	Tokens     Tokens `json:"tokens"`
-	Failed     bool   `json:"failed"`
+	Timestamp       string `json:"timestamp"`
+	Source          string `json:"source"`
+	AuthIndex       string `json:"auth_index,omitempty"`
+	APIKeyHash      string `json:"api_key_hash,omitempty"`
+	Provider        string `json:"provider,omitempty"`
+	AuthType        string `json:"auth_type,omitempty"`
+	LatencyMS       *int64 `json:"latency_ms,omitempty"`
+	TTFTMS          *int64 `json:"ttft_ms,omitempty"`
+	StatusCode      *int   `json:"status_code,omitempty"`
+	ErrorCode       string `json:"error_code,omitempty"`
+	ErrorMessage    string `json:"error_message,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	ServiceTier     string `json:"service_tier,omitempty"`
+	Tokens          Tokens `json:"tokens"`
+	Failed          bool   `json:"failed"`
 }
 
 type ModelAggregate struct {
@@ -126,6 +138,23 @@ func NormalizeRaw(raw []byte) (Event, error) {
 	}
 
 	latencyMS := readOptionalInt(record, "latency_ms", "latencyMs", "duration_ms", "durationMs", "elapsed_ms", "elapsedMs")
+	ttftMS := readOptionalInt(record, "ttft_ms", "ttftMs", "time_to_first_token_ms", "timeToFirstTokenMs")
+	statusCode := readOptionalInt32(record, "status_code", "statusCode", "http_status", "httpStatus", "status")
+	fail := firstMap(record, "fail", "error")
+	if statusCode == nil && fail != nil {
+		statusCode = readOptionalInt32(fail, "status_code", "statusCode", "http_status", "httpStatus", "status")
+	}
+	errorCode := readString(record, "error_code", "errorCode", "code")
+	errorMessage := readString(record, "error_message", "errorMessage", "message", "error")
+	if fail != nil {
+		if errorCode == "" {
+			errorCode = readString(fail, "error_code", "errorCode", "code")
+		}
+		if errorMessage == "" {
+			errorMessage = readString(fail, "body", "message", "error_message", "errorMessage")
+		}
+	}
+	errorMessage = summarizeErrorMessage(errorMessage)
 	failed := readFailed(record)
 	sourceRaw := readString(record, "source", "api_key", "apiKey", "key", "account", "email")
 	source := maskSource(sourceRaw)
@@ -153,6 +182,12 @@ func NormalizeRaw(raw []byte) (Event, error) {
 		CacheTokens:     cacheTokens,
 		TotalTokens:     totalTokens,
 		LatencyMS:       latencyMS,
+		TTFTMS:          ttftMS,
+		StatusCode:      statusCode,
+		ErrorCode:       errorCode,
+		ErrorMessage:    errorMessage,
+		ReasoningEffort: readString(record, "reasoning_effort", "reasoningEffort"),
+		ServiceTier:     readString(record, "service_tier", "serviceTier"),
 		Failed:          failed,
 		RawJSON:         rawJSON,
 		CreatedAtMS:     time.Now().UnixMilli(),
@@ -197,14 +232,20 @@ func BuildPayload(events []Event) Payload {
 			apiEntry.Models[model] = modelEntry
 		}
 		modelEntry.Details = append(modelEntry.Details, Detail{
-			Timestamp:  event.Timestamp,
-			Source:     event.Source,
-			AuthIndex:  event.AuthIndex,
-			APIKeyHash: event.APIKeyHash,
-			Provider:   event.Provider,
-			AuthType:   event.AuthType,
-			LatencyMS:  event.LatencyMS,
-			Failed:     event.Failed,
+			Timestamp:       event.Timestamp,
+			Source:          event.Source,
+			AuthIndex:       event.AuthIndex,
+			APIKeyHash:      event.APIKeyHash,
+			Provider:        event.Provider,
+			AuthType:        event.AuthType,
+			LatencyMS:       event.LatencyMS,
+			TTFTMS:          event.TTFTMS,
+			StatusCode:      event.StatusCode,
+			ErrorCode:       event.ErrorCode,
+			ErrorMessage:    event.ErrorMessage,
+			ReasoningEffort: event.ReasoningEffort,
+			ServiceTier:     event.ServiceTier,
+			Failed:          event.Failed,
 			Tokens: Tokens{
 				InputTokens:     event.InputTokens,
 				OutputTokens:    event.OutputTokens,
@@ -294,6 +335,15 @@ func readFailed(record map[string]any) bool {
 	return first(record, "error", "error_message", "errorMessage") != nil
 }
 
+func readOptionalInt32(record map[string]any, keys ...string) *int {
+	value := readInt(record, keys...)
+	if value == 0 && first(record, keys...) == nil {
+		return nil
+	}
+	converted := int(value)
+	return &converted
+}
+
 func readOptionalInt(record map[string]any, keys ...string) *int64 {
 	value := readInt(record, keys...)
 	if value == 0 && first(record, keys...) == nil {
@@ -353,6 +403,34 @@ func first(record map[string]any, keys ...string) any {
 		}
 	}
 	return nil
+}
+
+func firstMap(record map[string]any, keys ...string) map[string]any {
+	for _, key := range keys {
+		if value, ok := record[key].(map[string]any); ok {
+			return value
+		}
+	}
+	return nil
+}
+
+func summarizeErrorMessage(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(value), &payload); err == nil {
+		if message := readString(firstMap(payload, "error"), "message"); message != "" {
+			value = message
+		} else if message := readString(payload, "message", "error"); message != "" {
+			value = message
+		}
+	}
+	if len(value) > 240 {
+		return value[:240]
+	}
+	return value
 }
 
 func maxInt64(left, right int64) int64 {
@@ -448,6 +526,8 @@ func isSecretKey(key string) bool {
 	return normalized == "api_key" ||
 		normalized == "apikey" ||
 		normalized == "authorization" ||
+		normalized == "cookie" ||
+		normalized == "set_cookie" ||
 		normalized == "access_token" ||
 		normalized == "refresh_token" ||
 		normalized == "token" ||

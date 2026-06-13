@@ -89,6 +89,7 @@ Core dependent routes:
 /v0/management/usage
 /v0/management/usage/status
 /v0/management/usage/events
+/v0/management/usage/aggregates
 /v0/management/usage/stream
 /v0/management/usage/export
 /v0/management/usage/import
@@ -105,7 +106,9 @@ Core dependent routes:
 /v0/management/account-inspection/actions
 ```
 
-Account inspection is executed by the backend only. The management UI configures schedules, starts or controls runs, polls status/progress/results, streams logs and live status over WebSocket/WSS, and confirms manual actions.
+Request monitoring stores diagnostic fields such as TTFT, HTTP status code, structured error, reasoning effort, and service tier, and exposes the `/usage/aggregates` server-side aggregation API. `/usage/status` returns recent dead-letter samples with sensitive fields redacted.
+
+Account inspection is executed by the backend only. The management UI configures schedules, starts or controls runs, polls status/progress/results, streams logs and live status over WebSocket/WSS, and confirms manual actions. Backend automatic actions support consecutive-confirmation gating, and quota cache entries record parser version plus response-shape hashes to help diagnose upstream field changes.
 
 During backend inspection, eligible auth records are refreshed before quota/account probing when they are already in their normal refresh window. The inspection refresh path skips API-key accounts, accounts not yet due for refresh, and accounts still blocked by `NextRefreshAfter`; disabled accounts are allowed to refresh. If refresh succeeds, probing uses the refreshed auth. If refresh fails, the account is kept and probing is skipped for that account.
 

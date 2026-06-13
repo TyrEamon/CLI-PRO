@@ -2,6 +2,7 @@ package embeddedusage
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,21 +11,36 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/embeddedusage/internalusage"
 )
 
+var errTestParse = errors.New("parse failed")
+
 func testUsageEvent(index int, failed bool, totalTokens int64) internalusage.Event {
 	timestamp := time.Unix(1_700_000_000+int64(index), 0).UTC()
+	latency := int64(100 + index)
+	ttft := int64(20 + index)
+	status := 200
+	if failed {
+		status = 429
+	}
 	return internalusage.Event{
-		RequestID:   "request-" + string(rune('a'+index)),
-		EventHash:   "event-hash-" + string(rune('a'+index)),
-		TimestampMS: timestamp.UnixMilli(),
-		Timestamp:   timestamp.Format(time.RFC3339Nano),
-		Provider:    "test",
-		Model:       "model",
-		Endpoint:    "POST /v1/test",
-		Method:      "POST",
-		Path:        "/v1/test",
-		TotalTokens: totalTokens,
-		Failed:      failed,
-		CreatedAtMS: timestamp.UnixMilli(),
+		RequestID:       "request-" + string(rune('a'+index)),
+		EventHash:       "event-hash-" + string(rune('a'+index)),
+		TimestampMS:     timestamp.UnixMilli(),
+		Timestamp:       timestamp.Format(time.RFC3339Nano),
+		Provider:        "test",
+		Model:           "model",
+		Endpoint:        "POST /v1/test",
+		Method:          "POST",
+		Path:            "/v1/test",
+		TotalTokens:     totalTokens,
+		InputTokens:     totalTokens / 2,
+		OutputTokens:    totalTokens - totalTokens/2,
+		LatencyMS:       &latency,
+		TTFTMS:          &ttft,
+		StatusCode:      &status,
+		ReasoningEffort: "medium",
+		ServiceTier:     "default",
+		Failed:          failed,
+		CreatedAtMS:     timestamp.UnixMilli(),
 	}
 }
 
@@ -286,7 +302,8 @@ func TestRecentEventsUsesRecentIndex(t *testing.T) {
 		id, request_id, event_hash, timestamp_ms, timestamp, provider, model, endpoint, method, path,
 		auth_type, auth_index, source, source_hash, api_key_hash,
 		input_tokens, output_tokens, reasoning_tokens, cached_tokens, cache_tokens, total_tokens,
-		latency_ms, failed, raw_json, created_at_ms
+		latency_ms, ttft_ms, status_code, error_code, error_message, reasoning_effort, service_tier,
+		failed, raw_json, created_at_ms
 		from usage_events indexed by idx_usage_events_recent
 		order by timestamp_ms desc, id desc
 		limit ?`, 2)
@@ -313,5 +330,64 @@ func TestRecentEventsUsesRecentIndex(t *testing.T) {
 	}
 	if strings.Contains(plan, "temp b-tree") {
 		t.Fatalf("RecentEvents query plan = %q, want no temp b-tree sort", plan)
+	}
+}
+
+func TestUsageDiagnosticsRoundTripAndAggregates(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+
+	event := testUsageEvent(0, true, 42)
+	event.ErrorCode = "rate_limit"
+	event.ErrorMessage = "too many requests"
+	insertTestUsageEvents(t, store, event)
+
+	recent, err := store.RecentEvents(ctx, 1)
+	if err != nil {
+		t.Fatalf("RecentEvents() error = %v", err)
+	}
+	if len(recent) != 1 {
+		t.Fatalf("RecentEvents() len = %d, want 1", len(recent))
+	}
+	got := recent[0]
+	if got.TTFTMS == nil || *got.TTFTMS != 20 || got.StatusCode == nil || *got.StatusCode != 429 {
+		t.Fatalf("diagnostics = ttft:%v status:%v, want 20/429", got.TTFTMS, got.StatusCode)
+	}
+	if got.ErrorCode != "rate_limit" || got.ErrorMessage != "too many requests" || got.ReasoningEffort != "medium" || got.ServiceTier != "default" {
+		t.Fatalf("diagnostic strings = %+v", got)
+	}
+
+	buckets, err := store.UsageAggregates(ctx, UsageAggregateOptions{Interval: "hour", GroupBy: []string{"provider", "model"}, Limit: 10})
+	if err != nil {
+		t.Fatalf("UsageAggregates() error = %v", err)
+	}
+	if len(buckets) != 1 {
+		t.Fatalf("UsageAggregates() len = %d, want 1", len(buckets))
+	}
+	bucket := buckets[0]
+	if bucket.Provider != "test" || bucket.Model != "model" || bucket.TotalRequests != 1 || bucket.FailureCount != 1 || bucket.TotalTokens != 42 {
+		t.Fatalf("aggregate bucket = %+v, want provider/model failure tokens", bucket)
+	}
+	if bucket.AvgLatencyMS == nil || *bucket.AvgLatencyMS != 100 || bucket.AvgTTFTMS == nil || *bucket.AvgTTFTMS != 20 {
+		t.Fatalf("aggregate latency = %+v/%+v, want 100/20", bucket.AvgLatencyMS, bucket.AvgTTFTMS)
+	}
+}
+
+func TestRecentDeadLettersLimitsPayload(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+	payload := `{"api_key":"sk-secret","message":"` + strings.Repeat("x", 600) + `"}`
+	if err := store.AddDeadLetter(ctx, payload, errTestParse); err != nil {
+		t.Fatalf("AddDeadLetter() error = %v", err)
+	}
+	samples, err := store.RecentDeadLetters(ctx, 5)
+	if err != nil {
+		t.Fatalf("RecentDeadLetters() error = %v", err)
+	}
+	if len(samples) != 1 || len(samples[0].Payload) != 500 || samples[0].Error == "" {
+		t.Fatalf("dead letter samples = %+v, want truncated payload and error", samples)
+	}
+	if strings.Contains(samples[0].Payload, "sk-secret") || !strings.Contains(samples[0].Payload, "[redacted]") {
+		t.Fatalf("dead letter payload was not redacted: %s", samples[0].Payload)
 	}
 }

@@ -209,3 +209,38 @@ func TestHealthCountsCacheTracksResultUpdates(t *testing.T) {
 		t.Fatalf("after remove healthCounts = %+v, want empty", scheduler.healthCounts)
 	}
 }
+
+func TestAutoActionConfirmationDelaysExecution(t *testing.T) {
+	scheduler := &accountInspectionScheduler{}
+	result := testInspectionResult("quota", accountInspectionActionDisable, false, nil, true, "")
+	settings := defaultAccountInspectionSettings()
+	settings.AutoExecuteConfirmations = 2
+	settings.AutoExecuteQuotaLimitDisable = true
+
+	action := autoActionForResult(result, settings)
+	if action != accountInspectionActionDisable {
+		t.Fatalf("autoActionForResult() = %q, want disable", action)
+	}
+	confirmed, count, required := scheduler.confirmAutoAction(result, action, settings.AutoExecuteConfirmations)
+	if confirmed || count != 1 || required != 2 {
+		t.Fatalf("first confirmation = confirmed:%v count:%d required:%d, want false/1/2", confirmed, count, required)
+	}
+	confirmed, count, required = scheduler.confirmAutoAction(result, action, settings.AutoExecuteConfirmations)
+	if !confirmed || count != 2 || required != 2 {
+		t.Fatalf("second confirmation = confirmed:%v count:%d required:%d, want true/2/2", confirmed, count, required)
+	}
+	scheduler.clearAutoActionConfirmation(result)
+	if len(scheduler.autoActionConfirmations) != 0 {
+		t.Fatalf("autoActionConfirmations = %+v, want empty after clear", scheduler.autoActionConfirmations)
+	}
+}
+
+func TestQuotaSuccessStateIncludesParserMetadata(t *testing.T) {
+	state := quotaSuccessState(map[string]any{"rawShapeHash": jsonShapeHash(`{"a":1,"items":[{"b":true}]}`)})
+	if state["schemaVersion"] != 2 || state["parserVersion"] != accountInspectionQuotaParserVersion || state["status"] != "success" {
+		t.Fatalf("quota state metadata = %+v", state)
+	}
+	if state["rawShapeHash"] == "" {
+		t.Fatalf("rawShapeHash = %q, want populated", state["rawShapeHash"])
+	}
+}

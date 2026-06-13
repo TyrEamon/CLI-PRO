@@ -41,6 +41,7 @@ internal/embeddedusage
 
 - `GET /v0/management/usage` — 管理页面使用的聚合 usage 数据。
 - `GET /v0/management/usage/events` — cursor 之后的增量 usage events。
+- `GET /v0/management/usage/aggregates` — 按时间桶和 provider/model/endpoint/API key 聚合 usage。
 - `GET /v0/management/usage/stream` — usage 实时更新 SSE 流。
 - `GET /v0/management/usage/export` — JSONL/NDJSON 导出。
 - `POST /v0/management/usage/import` — JSONL/NDJSON 导入。
@@ -100,6 +101,8 @@ internal/embeddedusage
 ### 后端账号巡检调度器
 
 补丁层在 management API 下增加账号巡检路由：
+
+请求监控会额外保存 TTFT、HTTP 状态码、结构化错误、reasoning effort 和 service tier；`/usage/status` 会返回最近 dead letter 样本并对敏感字段脱敏。账号巡检自动动作支持连续确认门槛，quota cache 会记录解析器版本和返回结构 hash。
 
 - `GET /v0/management/account-inspection/schedule`
 - `GET /v0/management/account-inspection/status`

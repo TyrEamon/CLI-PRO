@@ -37,6 +37,7 @@ export interface AccountInspectionConfigurableSettings {
   autoExecuteQuotaRecoveryEnable: boolean;
   autoExecuteAccountInvalidAction: AccountInspectionAutoErrorAction;
   autoExecuteRequestErrorAction: AccountInspectionAutoErrorAction;
+  autoExecuteConfirmations: number;
 }
 
 export interface AccountInspectionAccount {
@@ -237,6 +238,7 @@ export const ACCOUNT_INSPECTION_SETTING_LIMITS = {
   retries: { min: 0, max: 1 },
   usedPercentThreshold: { min: 0, max: 100 },
   sampleSize: { min: 0 },
+  autoExecuteConfirmations: { min: 1, max: 5 },
   scheduleIntervalMinutes: { min: 1 },
 } as const;
 
@@ -257,6 +259,7 @@ export const DEFAULT_ACCOUNT_INSPECTION_SETTINGS: AccountInspectionConfigurableS
   autoExecuteQuotaRecoveryEnable: false,
   autoExecuteAccountInvalidAction: 'none',
   autoExecuteRequestErrorAction: 'none',
+  autoExecuteConfirmations: 1,
 };
 
 type IntegerBounds = {
@@ -359,6 +362,7 @@ const readConfigurableSettingsFromConfig = (
     autoExecuteQuotaRecoveryEnable: undefined,
     autoExecuteAccountInvalidAction: undefined,
     autoExecuteRequestErrorAction: undefined,
+    autoExecuteConfirmations: undefined,
     antigravityDeepProbeEnabled: undefined,
     antigravityDeepProbeModel: undefined,
     antigravityQuotaMode: undefined,
@@ -438,6 +442,12 @@ const normalizeConfigurableSettings = (
     ),
     autoExecuteRequestErrorAction: normalizeAutoErrorAction(
       merged.autoExecuteRequestErrorAction ?? (merged as { autoExecuteAccountErrorAction?: unknown }).autoExecuteAccountErrorAction
+    ),
+    autoExecuteConfirmations: clampInteger(
+      normalizeNumberValue(merged.autoExecuteConfirmations),
+      DEFAULT_ACCOUNT_INSPECTION_SETTINGS.autoExecuteConfirmations,
+      ACCOUNT_INSPECTION_SETTING_LIMITS.autoExecuteConfirmations,
+      { clampBelowMin: true }
     ),
   };
 };

@@ -52,6 +52,9 @@ func RegisterGinRoutes(group *gin.RouterGroup) {
 		group.GET("/events", func(c *gin.Context) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "usage service is not available"})
 		})
+		group.GET("/aggregates", func(c *gin.Context) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "usage service is not available"})
+		})
 		group.GET("/stream", func(c *gin.Context) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "usage service is not available"})
 		})
@@ -87,6 +90,7 @@ func (s *Server) RegisterGinRoutes(group *gin.RouterGroup) {
 	group.POST("/import", s.handleUsageImport)
 	group.GET("/status", s.handleStatus)
 	group.GET("/events", s.handleUsageEvents)
+	group.GET("/aggregates", s.handleUsageAggregates)
 	group.GET("/stream", s.handleUsageStream)
 	group.GET("/quota-cache", s.handleQuotaCacheGet)
 	group.PUT("/quota-cache", s.handleQuotaCachePut)
@@ -194,6 +198,22 @@ func (s *Server) handleUsageEvents(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, usagePayloadWithDetailLimit(events, limit, detailsLimited))
+}
+
+func (s *Server) handleUsageAggregates(c *gin.Context) {
+	options := UsageAggregateOptions{
+		FromMS:   parseQueryInt64(c, "from_ms", 0),
+		ToMS:     parseQueryInt64(c, "to_ms", 0),
+		Interval: strings.TrimSpace(c.Query("interval")),
+		GroupBy:  parseCSVQuery(c.Query("group_by")),
+		Limit:    parseQueryInt(c, "limit", 1000),
+	}
+	buckets, err := s.store.UsageAggregates(c.Request.Context(), options)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": buckets})
 }
 
 func (s *Server) handleUsageStream(c *gin.Context) {
@@ -505,14 +525,32 @@ func (s *Server) handleStatus(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	deadLetterSamples, err := s.store.RecentDeadLetters(c.Request.Context(), parseQueryInt(c, "dead_letter_limit", 5))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"service":           "embedded-usage-service",
 		"dbPath":            s.cfg.DBPath,
 		"events":            events,
 		"deadLetters":       deadLetters,
+		"deadLetterSamples": deadLetterSamples,
 		"latestId":          latestID,
 		"latestTimestampMs": latestTimestamp,
 	})
+}
+
+func parseCSVQuery(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func (s *Server) handleQuotaCacheGet(c *gin.Context) {

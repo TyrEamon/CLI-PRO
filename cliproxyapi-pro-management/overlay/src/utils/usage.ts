@@ -29,6 +29,12 @@ export interface UsageDetail {
   provider?: string;
   auth_type?: string;
   latency_ms?: number;
+  ttft_ms?: number;
+  status_code?: number;
+  error_code?: string;
+  error_message?: string;
+  reasoning_effort?: string;
+  service_tier?: string;
   tokens: UsageTokens;
   failed: boolean;
   __modelName?: string;
@@ -179,8 +185,12 @@ export function buildCandidateUsageSourceIds(input: {
 }
 
 export function extractLatencyMs(detail: unknown): number | null {
+  return extractNonNegativeNumberField(detail, ['latency_ms', 'latencyMs']);
+}
+
+const extractNonNegativeNumberField = (detail: unknown, keys: string[]): number | null => {
   const record = isRecord(detail) ? detail : null;
-  const rawValue = record?.latency_ms ?? record?.latencyMs;
+  const rawValue = keys.reduce<unknown>((found, key) => found ?? record?.[key], undefined);
   if (
     rawValue === null ||
     rawValue === undefined ||
@@ -191,7 +201,7 @@ export function extractLatencyMs(detail: unknown): number | null {
 
   const parsed = Number(rawValue);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
-}
+};
 
 const readTokens = (detail: Record<string, unknown>): UsageTokens => {
   const tokensRaw = isRecord(detail.tokens) ? detail.tokens : {};
@@ -233,6 +243,8 @@ const buildUsageDetail = (
   const timestamp = detailRaw.timestamp;
   const timestampMs = parseTimestampMs(timestamp);
   const latencyMs = extractLatencyMs(detailRaw);
+  const ttftMs = extractNonNegativeNumberField(detailRaw, ['ttft_ms', 'ttftMs']);
+  const statusCode = extractNonNegativeNumberField(detailRaw, ['status_code', 'statusCode']);
 
   const provider = typeof detailRaw.provider === 'string' ? detailRaw.provider.trim() : undefined;
   const authType = typeof detailRaw.auth_type === 'string'
@@ -256,6 +268,28 @@ const buildUsageDetail = (
     provider: provider || undefined,
     auth_type: authType || undefined,
     latency_ms: latencyMs ?? undefined,
+    ttft_ms: ttftMs ?? undefined,
+    status_code: statusCode ?? undefined,
+    error_code: typeof detailRaw.error_code === 'string'
+      ? detailRaw.error_code
+      : typeof detailRaw.errorCode === 'string'
+        ? detailRaw.errorCode
+        : undefined,
+    error_message: typeof detailRaw.error_message === 'string'
+      ? detailRaw.error_message
+      : typeof detailRaw.errorMessage === 'string'
+        ? detailRaw.errorMessage
+        : undefined,
+    reasoning_effort: typeof detailRaw.reasoning_effort === 'string'
+      ? detailRaw.reasoning_effort
+      : typeof detailRaw.reasoningEffort === 'string'
+        ? detailRaw.reasoningEffort
+        : undefined,
+    service_tier: typeof detailRaw.service_tier === 'string'
+      ? detailRaw.service_tier
+      : typeof detailRaw.serviceTier === 'string'
+        ? detailRaw.serviceTier
+        : undefined,
     tokens: readTokens(detailRaw),
     failed: detailRaw.failed === true,
     __modelName: modelName,

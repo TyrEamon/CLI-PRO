@@ -1295,7 +1295,8 @@ const sameInspectionSettings = (left: AccountInspectionConfigurableSettings, rig
   left.autoExecuteQuotaLimitDisable === right.autoExecuteQuotaLimitDisable &&
   left.autoExecuteQuotaRecoveryEnable === right.autoExecuteQuotaRecoveryEnable &&
   left.autoExecuteAccountInvalidAction === right.autoExecuteAccountInvalidAction &&
-  left.autoExecuteRequestErrorAction === right.autoExecuteRequestErrorAction;
+  left.autoExecuteRequestErrorAction === right.autoExecuteRequestErrorAction &&
+  left.autoExecuteConfirmations === right.autoExecuteConfirmations;
 
 const sameSettingsDraft = (left: InspectionSettingsDraft, right: InspectionSettingsDraft) =>
   left.targetType === right.targetType &&
@@ -2479,6 +2480,7 @@ export function AccountInspectionPage() {
         autoExecuteQuotaRecoveryEnable: settingsDraft.autoExecuteQuotaRecoveryEnable,
         autoExecuteAccountInvalidAction: settingsDraft.autoExecuteAccountInvalidAction,
         autoExecuteRequestErrorAction: settingsDraft.autoExecuteRequestErrorAction,
+        autoExecuteConfirmations: inspectionSettings.autoExecuteConfirmations,
       });
 
       const intervalMinutes = parseIntegerInRange(
