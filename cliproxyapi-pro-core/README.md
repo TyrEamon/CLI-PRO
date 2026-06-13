@@ -254,7 +254,7 @@ Workflow：
 1. 检查 upstream CLIProxyAPI 最新 release，并计算当前 Pro release tag，例如 `v7.1.18-pro`。
 2. 检查 upstream management 最新 release。
 3. 构建并推送 `linux/amd64` 和 `linux/arm64` Docker 镜像，tag 包括 `latest` 和 Pro release tag。
-4. 使用 GoReleaser 构建与 upstream 平台和压缩格式一致的 Pro 二进制资产，资产名前缀保持为 `CLIProxyAPI`。
+4. 构建与 upstream 平台和压缩格式一致的 Pro 二进制资产，资产名前缀保持为 `CLIProxyAPI`；默认桌面/Linux 包启用 CGO 以支持动态库插件，`_no-plugin` 包保留 CGO-free 静态便携构建。
 5. 应用 management 定制层并构建 `management.html`。
 6. 创建或更新当前仓库 GitHub Release，上传二进制资产、`checksums.txt` 和 `management.html`。
 7. Release notes 写入 core upstream 与 management upstream 的版本映射和 release notes。

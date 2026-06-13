@@ -162,7 +162,7 @@ v7.1.18-pro
 2. 计算 Pro release tag，例如 `v7.1.18-pro`。
 3. checkout upstream core 和 upstream management 最新 release。
 4. 应用 core patch，构建并推送 Docker 镜像。
-5. 使用 GoReleaser 构建 Pro 二进制资产。
+5. 构建 Pro 二进制资产：默认桌面/Linux 包启用 CGO 并支持动态库插件，`_no-plugin` 包保留 CGO-free 静态便携构建。
 6. 应用 management 定制层，构建单文件 `management.html`。
 7. 创建或更新当前仓库的 GitHub Release，并上传二进制、`checksums.txt` 和 `management.html`。
 8. release notes 同时包含 core upstream 和 management upstream 的版本映射与 release notes。
@@ -177,15 +177,18 @@ v7.1.18-pro
 
 Docker 构建参数中 `CLIPROXY_VERSION` 用于下载 upstream core tag，`CLIPROXY_BUILD_VERSION` 用于写入运行时版本号，因此镜像和二进制显示的版本是 `v7.1.18-pro`，但源码仍来自 upstream `v7.1.18`。
 
-二进制资产平台和压缩格式与 upstream CLIProxyAPI 保持一致，版本号使用 Pro release tag，因此资产名前缀保持为 `CLIProxyAPI`：
+二进制资产平台和压缩格式与 upstream CLIProxyAPI 保持一致，版本号使用 Pro release tag，因此资产名前缀保持为 `CLIProxyAPI`。默认桌面/Linux 包支持动态库插件；`_no-plugin` 包用于静态或受限环境。Docker 镜像保持 CGO-free 便携构建：
 
 ```text
 CLIProxyAPI_7.1.18-pro_linux_amd64.tar.gz
 CLIProxyAPI_7.1.18-pro_linux_aarch64.tar.gz
+CLIProxyAPI_7.1.18-pro_linux_amd64_no-plugin.tar.gz
+CLIProxyAPI_7.1.18-pro_linux_aarch64_no-plugin.tar.gz
 CLIProxyAPI_7.1.18-pro_darwin_amd64.tar.gz
 CLIProxyAPI_7.1.18-pro_darwin_aarch64.tar.gz
 CLIProxyAPI_7.1.18-pro_freebsd_amd64.tar.gz
-CLIProxyAPI_7.1.18-pro_freebsd_aarch64.tar.gz
+CLIProxyAPI_7.1.18-pro_freebsd_amd64_no-plugin.tar.gz
+CLIProxyAPI_7.1.18-pro_freebsd_aarch64_no-plugin.tar.gz
 CLIProxyAPI_7.1.18-pro_windows_amd64.zip
 CLIProxyAPI_7.1.18-pro_windows_aarch64.zip
 checksums.txt

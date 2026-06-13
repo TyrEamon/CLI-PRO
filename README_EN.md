@@ -137,7 +137,7 @@ Overview:
 2. Computes the Pro release tag, for example `v7.1.18-pro`.
 3. Checks out the latest upstream core and upstream management releases.
 4. Applies core patches, then builds and pushes the Docker image.
-5. Builds Pro binary assets with GoReleaser.
+5. Builds Pro binary assets: default desktop/Linux archives enable CGO for dynamic-library plugin support, while `_no-plugin` archives remain CGO-free portable builds.
 6. Applies the management customization layer and builds the single-file `management.html`.
 7. Creates or updates the current repository GitHub Release, then uploads binaries, `checksums.txt`, and `management.html`.
 8. Includes both core upstream and management upstream version mapping and release notes in the release notes.
@@ -152,15 +152,18 @@ v7.1.18-pro
 
 During Docker builds, `CLIPROXY_VERSION` selects the upstream core tag to download, while `CLIPROXY_BUILD_VERSION` sets the runtime version. This lets the image and binary report `v7.1.18-pro` while still building from upstream `v7.1.18` source.
 
-Binary asset platforms and archive formats match upstream CLIProxyAPI. The version already carries the Pro release tag, so the asset prefix remains `CLIProxyAPI`:
+Binary asset platforms and archive formats match upstream CLIProxyAPI. The version already carries the Pro release tag, so the asset prefix remains `CLIProxyAPI`. Default desktop/Linux archives support dynamic-library plugins; `_no-plugin` archives are for static or constrained environments. Docker images remain CGO-free portable builds:
 
 ```text
 CLIProxyAPI_7.1.18-pro_linux_amd64.tar.gz
 CLIProxyAPI_7.1.18-pro_linux_aarch64.tar.gz
+CLIProxyAPI_7.1.18-pro_linux_amd64_no-plugin.tar.gz
+CLIProxyAPI_7.1.18-pro_linux_aarch64_no-plugin.tar.gz
 CLIProxyAPI_7.1.18-pro_darwin_amd64.tar.gz
 CLIProxyAPI_7.1.18-pro_darwin_aarch64.tar.gz
 CLIProxyAPI_7.1.18-pro_freebsd_amd64.tar.gz
-CLIProxyAPI_7.1.18-pro_freebsd_aarch64.tar.gz
+CLIProxyAPI_7.1.18-pro_freebsd_amd64_no-plugin.tar.gz
+CLIProxyAPI_7.1.18-pro_freebsd_aarch64_no-plugin.tar.gz
 CLIProxyAPI_7.1.18-pro_windows_amd64.zip
 CLIProxyAPI_7.1.18-pro_windows_aarch64.zip
 checksums.txt

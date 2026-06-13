@@ -254,7 +254,7 @@ The workflow:
 1. Checks the latest upstream CLIProxyAPI release and computes the Pro release tag, for example `v7.1.18-pro`.
 2. Checks the latest upstream management release.
 3. Builds and pushes `linux/amd64` and `linux/arm64` Docker images tagged with `latest` and the Pro release tag.
-4. Builds Pro binary assets with GoReleaser using the same platform matrix and archive formats as upstream, with the `CLIProxyAPI` asset prefix.
+4. Builds Pro binary assets with the same platform matrix and archive formats as upstream, with the `CLIProxyAPI` asset prefix; default desktop/Linux archives enable CGO for dynamic-library plugin support, while `_no-plugin` archives remain CGO-free portable builds.
 5. Applies the management customization layer and builds `management.html`.
 6. Creates or updates the current repository GitHub Release, then uploads binary assets, `checksums.txt`, and `management.html`.
 7. Writes core upstream and management upstream version mappings plus release notes into the GitHub Release notes.
