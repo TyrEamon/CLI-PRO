@@ -7,6 +7,7 @@ import { useQuotaStore } from '@/stores';
 import {
   getQuotaProviderMapName,
   getQuotaProviderSetterName,
+  isRecordValue,
   isQuotaProviderType,
   QUOTA_PROVIDER_TYPES,
   type QuotaProviderType,
@@ -263,6 +264,10 @@ class QuotaPersistenceMiddleware {
         let changed = false;
         const next = { ...prev };
         cached.forEach((entry, fileName) => {
+          if (!this.isCacheEntryCompatible(provider, entry.data)) {
+            void sqliteQuotaCache.delete(provider, fileName);
+            return;
+          }
           this.syncedVersions.set(`${provider}:${fileName}`, this.getSyncVersion(entry.data));
           if (next[fileName] === entry.data) return;
           next[fileName] = entry.data;
@@ -272,6 +277,34 @@ class QuotaPersistenceMiddleware {
       });
 
       console.log(`QuotaPersistenceMiddleware: Preloaded ${cached.size} entries for ${provider}`);
+    }
+  }
+
+  private isCacheEntryCompatible(provider: QuotaProviderType, data: unknown): data is QuotaStatusState {
+    if (!isRecordValue(data)) return false;
+
+    const status = data.status;
+    if (!['idle', 'loading', 'success', 'error'].includes(String(status))) return false;
+    if (status !== 'success') return true;
+
+    switch (provider) {
+      case 'antigravity': {
+        const groups = data.groups;
+        return Array.isArray(groups) && groups.every((group) => (
+          isRecordValue(group) && Array.isArray(group.buckets)
+        ));
+      }
+      case 'claude':
+      case 'codex':
+        return Array.isArray(data.windows);
+      case 'gemini-cli':
+        return Array.isArray(data.buckets);
+      case 'kimi':
+        return Array.isArray(data.rows);
+      case 'xai':
+        return isRecordValue(data.billing);
+      default:
+        return false;
     }
   }
 

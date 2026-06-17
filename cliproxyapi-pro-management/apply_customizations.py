@@ -286,6 +286,21 @@ def patch_quota_configs(target: Path) -> None:
         ),
     ]:
         replace_once_in_quota_config(path, store_setter, old, new)
+    for old, new in [
+        (
+            "  const groups = quota.groups ?? [];\n",
+            "  const groups = Array.isArray(quota.groups) ? quota.groups : [];\n",
+        ),
+        (
+            "        ...group.buckets.map((bucket) => {\n",
+            "        ...(Array.isArray(group.buckets) ? group.buckets : []).map((bucket) => {\n",
+        ),
+        (
+            "  const buckets = quota.buckets ?? [];\n",
+            "  const buckets = Array.isArray(quota.buckets) ? quota.buckets : [];\n",
+        ),
+    ]:
+        replace_once(path, old, new)
 
 
 def patch_quota_page(target: Path) -> None:
