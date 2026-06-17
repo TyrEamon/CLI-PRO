@@ -471,6 +471,14 @@ const healthLabelKey: Record<ResultHealthStatus, string> = {
   recoverable: 'monitoring.account_inspection_health_recoverable',
 };
 
+const formatHealthErrorCode = (item: AccountInspectionResultItem): string | null => {
+  if (item.statusCode !== null && item.statusCode >= 400) {
+    return `HTTP ${item.statusCode}`;
+  }
+  const match = item.error.match(/\bHTTP\s+(\d{3})\b/i) ?? item.error.match(/\bstatus(?:\s+code)?\s*[:=]?\s*(\d{3})\b/i);
+  return match ? `HTTP ${match[1]}` : null;
+};
+
 const deepProbeLabelKey: Record<Exclude<NonNullable<AccountInspectionResultItem['deepProbeStatus']>, ''>, string> = {
   success: 'monitoring.account_inspection_deep_probe_success',
   quota: 'monitoring.account_inspection_deep_probe_quota',
@@ -2915,10 +2923,16 @@ export function AccountInspectionPage() {
                   {filteredResultRows.length > 0 ? (
                     visibleResultRows.map(({ item, healthStatus, manualActions }) => {
                       const tokenRefreshDetail = formatTokenRefreshDetail(item, i18n.language, t);
+                      const healthErrorCode = formatHealthErrorCode(item);
                       return (
                         <tr key={item.key}>
                           <td><div className={styles.primaryCell}><span>{item.fileName}</span><small>{item.provider}</small></div></td>
-                          <td><span className={`${styles.healthBadge} ${healthToneClass[healthStatus]}`}>{t(healthLabelKey[healthStatus])}</span></td>
+                          <td>
+                            <div className={styles.healthCell}>
+                              <span className={`${styles.healthBadge} ${healthToneClass[healthStatus]}`}>{t(healthLabelKey[healthStatus])}</span>
+                              {healthErrorCode ? <span className={styles.healthCode}>{healthErrorCode}</span> : null}
+                            </div>
+                          </td>
                           <td><span className={item.disabled ? styles.stateTextMuted : styles.stateTextGood}>{formatCurrentStateLabel(item, t)}</span></td>
                           <td>
                             <div className={styles.quotaCell}>
