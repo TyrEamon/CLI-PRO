@@ -437,12 +437,8 @@ const normalizeConfigurableSettings = (
     antigravityDeepProbeModel: readStringValue(merged.antigravityDeepProbeModel) ||
       DEFAULT_ACCOUNT_INSPECTION_SETTINGS.antigravityDeepProbeModel,
     antigravityQuotaMode: normalizeAntigravityQuotaMode(merged.antigravityQuotaMode),
-    autoExecuteAccountInvalidAction: normalizeAutoErrorAction(
-      merged.autoExecuteAccountInvalidAction ?? (merged as { autoExecuteAccountErrorAction?: unknown }).autoExecuteAccountErrorAction
-    ),
-    autoExecuteRequestErrorAction: normalizeAutoErrorAction(
-      merged.autoExecuteRequestErrorAction ?? (merged as { autoExecuteAccountErrorAction?: unknown }).autoExecuteAccountErrorAction
-    ),
+    autoExecuteAccountInvalidAction: normalizeAutoErrorAction(merged.autoExecuteAccountInvalidAction),
+    autoExecuteRequestErrorAction: normalizeAutoErrorAction(merged.autoExecuteRequestErrorAction),
     autoExecuteConfirmations: clampInteger(
       normalizeNumberValue(merged.autoExecuteConfirmations),
       DEFAULT_ACCOUNT_INSPECTION_SETTINGS.autoExecuteConfirmations,

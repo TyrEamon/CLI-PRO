@@ -48,7 +48,7 @@ const (
 	accountInspectionProgressBroadcastGap   = 500 * time.Millisecond
 	accountInspectionMaxResultPageSize      = 500
 	accountInspectionMaxLogPageSize         = 500
-	accountInspectionQuotaParserVersion     = 2
+	accountInspectionQuotaParserVersion     = 3
 )
 
 var accountInspectionWebSocketUpgrader = websocket.Upgrader{
@@ -81,7 +81,6 @@ type accountInspectionSettings struct {
 	AutoExecuteQuotaRecoveryEnable  bool                                  `json:"autoExecuteQuotaRecoveryEnable"`
 	AutoExecuteAccountInvalidAction accountInspectionAction               `json:"autoExecuteAccountInvalidAction"`
 	AutoExecuteRequestErrorAction   accountInspectionAction               `json:"autoExecuteRequestErrorAction"`
-	AutoExecuteAccountErrorAction   accountInspectionAction               `json:"autoExecuteAccountErrorAction,omitempty"`
 	AutoExecuteConfirmations        int                                   `json:"autoExecuteConfirmations,omitempty"`
 }
 
@@ -471,18 +470,8 @@ func normalizeAccountInspectionSchedule(input accountInspectionSchedule) account
 	if settings.AntigravityQuotaMode != accountInspectionAntigravityQuotaModeMaxUsed && settings.AntigravityQuotaMode != accountInspectionAntigravityQuotaModeClaudeGpt {
 		settings.AntigravityQuotaMode = defaults.AntigravityQuotaMode
 	}
-	legacyAccountErrorAction := normalizeAccountInspectionAutoAction(settings.AutoExecuteAccountErrorAction)
 	settings.AutoExecuteAccountInvalidAction = normalizeAccountInspectionAutoAction(settings.AutoExecuteAccountInvalidAction)
 	settings.AutoExecuteRequestErrorAction = normalizeAccountInspectionAutoAction(settings.AutoExecuteRequestErrorAction)
-	if legacyAccountErrorAction != accountInspectionActionNone {
-		if settings.AutoExecuteAccountInvalidAction == accountInspectionActionNone {
-			settings.AutoExecuteAccountInvalidAction = legacyAccountErrorAction
-		}
-		if settings.AutoExecuteRequestErrorAction == accountInspectionActionNone {
-			settings.AutoExecuteRequestErrorAction = legacyAccountErrorAction
-		}
-	}
-	settings.AutoExecuteAccountErrorAction = accountInspectionActionNone
 	input.Settings = settings
 	if input.IntervalMinutes <= 0 {
 		input.IntervalMinutes = accountInspectionDefaultIntervalMin
@@ -1960,25 +1949,9 @@ func selectAntigravityDeepProbeModel(groups []map[string]any, preferredModel str
 	if model := strings.TrimSpace(preferredModel); model != "" {
 		return model
 	}
-	priority := []string{"claude-sonnet-4-6", "gpt-oss-120b-medium", "claude-opus-4-6-thinking"}
-	available := make(map[string]struct{})
 	for _, group := range groups {
-		if stringFromAny(group["id"]) != "claude-gpt" {
-			continue
-		}
-		for _, raw := range anySlice(group["models"]) {
-			model := stringFromAny(raw)
-			if model != "" {
-				available[model] = struct{}{}
-			}
-		}
-	}
-	for _, model := range priority {
-		if model == "" {
-			continue
-		}
-		if _, ok := available[model]; ok {
-			return model
+		if stringFromAny(group["id"]) == "claude-gpt" || strings.EqualFold(stringFromAny(group["label"]), "Claude/GPT") {
+			return "claude-sonnet-4-6"
 		}
 	}
 	return ""
@@ -2919,65 +2892,7 @@ func buildAntigravityGroups(body string) ([]map[string]any, error) {
 	if groups := buildAntigravitySummaryGroups(payload); len(groups) > 0 {
 		return groups, nil
 	}
-	models, ok := payload["models"].(map[string]any)
-	if !ok || len(models) == 0 {
-		return nil, fmt.Errorf("empty models")
-	}
-	defs := []struct {
-		ID          string
-		Label       string
-		Identifiers []string
-	}{
-		{"claude-gpt", "Claude/GPT", []string{"claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-oss-120b-medium"}},
-		{"gemini-3-pro", "Gemini 3 Pro", []string{"gemini-3-pro-high", "gemini-3-pro-low"}},
-		{"gemini-3-1-pro-series", "Gemini 3.1 Pro Series", []string{"gemini-3.1-pro-high", "gemini-3.1-pro-low"}},
-		{"gemini-2-5-flash", "Gemini 2.5 Flash", []string{"gemini-2.5-flash", "gemini-2.5-flash-thinking"}},
-		{"gemini-2-5-flash-lite", "Gemini 2.5 Flash Lite", []string{"gemini-2.5-flash-lite"}},
-		{"gemini-2-5-cu", "Gemini 2.5 CU", []string{"rev19-uic3-1p"}},
-		{"gemini-3-flash", "Gemini 3 Flash", []string{"gemini-3-flash"}},
-		{"gemini-image", "gemini-3.1-flash-image", []string{"gemini-3.1-flash-image"}},
-	}
-	groups := make([]map[string]any, 0, len(defs))
-	for _, def := range defs {
-		var fractions []float64
-		modelIDs := make([]string, 0)
-		resetTime := ""
-		for _, identifier := range def.Identifiers {
-			entry := findAntigravityEntry(models, identifier)
-			if entry == nil {
-				continue
-			}
-			fraction, ok := antigravityRemainingFraction(entry)
-			if !ok {
-				continue
-			}
-			fractions = append(fractions, fraction)
-			modelIDs = append(modelIDs, identifier)
-			if resetTime == "" {
-				resetTime = nestedString(entry, "quotaInfo", "resetTime")
-				if resetTime == "" {
-					resetTime = nestedString(entry, "quota_info", "reset_time")
-				}
-			}
-		}
-		if len(fractions) == 0 {
-			continue
-		}
-		remaining := fractions[0]
-		for _, value := range fractions[1:] {
-			if value < remaining {
-				remaining = value
-			}
-		}
-		bucket := map[string]any{"id": def.ID + "-quota", "label": def.Label, "remainingFraction": remaining}
-		group := map[string]any{"id": def.ID, "label": def.Label, "models": modelIDs, "remainingFraction": remaining, "buckets": []map[string]any{bucket}}
-		if resetTime != "" {
-			group["resetTime"] = resetTime
-			bucket["resetTime"] = resetTime
-		}
-		groups = append(groups, group)
-	}
-	return groups, nil
+	return nil, fmt.Errorf("empty antigravity quota groups")
 }
 
 func buildAntigravitySummaryGroups(payload map[string]any) []map[string]any {
@@ -3029,19 +2944,32 @@ func buildAntigravitySummaryGroups(payload map[string]any) []map[string]any {
 		if len(buckets) == 0 {
 			continue
 		}
+		sort.SliceStable(buckets, func(i, j int) bool {
+			leftOrder := antigravityBucketWindowOrder(stringFromAny(buckets[i]["window"]))
+			rightOrder := antigravityBucketWindowOrder(stringFromAny(buckets[j]["window"]))
+			if leftOrder != rightOrder {
+				return leftOrder < rightOrder
+			}
+			return stringFromAny(buckets[i]["label"]) < stringFromAny(buckets[j]["label"])
+		})
 		parsedGroup := map[string]any{"id": groupID, "label": label, "buckets": buckets}
 		if description := firstNonEmptyStringValue(stringFromAny(group["description"])); description != "" {
 			parsedGroup["description"] = description
 		}
-		if remaining := minRemainingFractionFromBuckets(buckets); remaining != nil {
-			parsedGroup["remainingFraction"] = *remaining
-		}
-		if resetTime := earliestResetTimeFromBuckets(buckets); resetTime != "" {
-			parsedGroup["resetTime"] = resetTime
-		}
 		groups = append(groups, parsedGroup)
 	}
 	return groups
+}
+
+func antigravityBucketWindowOrder(window string) int {
+	switch strings.ToLower(strings.TrimSpace(window)) {
+	case "weekly", "week":
+		return 0
+	case "5h", "five-hour", "five_hour":
+		return 1
+	default:
+		return math.MaxInt
+	}
 }
 
 func minRemainingFractionFromBuckets(buckets []map[string]any) *float64 {
@@ -3103,40 +3031,6 @@ func anyMapSlice(value any) []map[string]any {
 	}
 }
 
-func findAntigravityEntry(models map[string]any, identifier string) map[string]any {
-	if entry, ok := models[identifier].(map[string]any); ok {
-		return entry
-	}
-	for _, raw := range models {
-		entry, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		if strings.EqualFold(stringFromAny(entry["displayName"]), identifier) {
-			return entry
-		}
-	}
-	return nil
-}
-
-func antigravityRemainingFraction(entry map[string]any) (float64, bool) {
-	for _, key := range []string{"quotaInfo", "quota_info"} {
-		quota, ok := entry[key].(map[string]any)
-		if !ok {
-			continue
-		}
-		for _, quotaKey := range []string{"remainingFraction", "remaining_fraction", "remaining"} {
-			if value, ok := floatFromAny(quota[quotaKey]); ok {
-				return normalizeFraction(value), true
-			}
-		}
-		if nestedString(entry, key, "resetTime") != "" || nestedString(entry, key, "reset_time") != "" {
-			return 0, true
-		}
-	}
-	return 0, false
-}
-
 func antigravityUsedPercent(groups []map[string]any, mode accountInspectionAntigravityQuotaMode) *float64 {
 	if mode == accountInspectionAntigravityQuotaModeMaxUsed {
 		values := make([]float64, 0, len(groups))
@@ -3160,9 +3054,6 @@ func antigravityGroupUsedPercent(group map[string]any) *float64 {
 }
 
 func antigravityGroupRemainingFraction(group map[string]any) (float64, bool) {
-	if remaining, ok := floatFromAny(group["remainingFraction"]); ok {
-		return normalizeFraction(remaining), true
-	}
 	if remaining := minRemainingFractionFromBuckets(anyMapSlice(group["buckets"])); remaining != nil {
 		return *remaining, true
 	}

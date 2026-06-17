@@ -268,8 +268,11 @@ func TestBuildAntigravityGroupsSupportsSummaryBuckets(t *testing.T) {
 	if !ok || len(buckets) != 2 {
 		t.Fatalf("buckets = %#v, want two parsed buckets", groups[0]["buckets"])
 	}
-	if groups[0]["remainingFraction"] != 0.25 {
-		t.Fatalf("remainingFraction = %#v, want 0.25", groups[0]["remainingFraction"])
+	if _, ok := groups[0]["remainingFraction"]; ok {
+		t.Fatalf("remainingFraction is present on group, want latest bucket-only shape")
+	}
+	if buckets[0]["id"] != "weekly" || buckets[1]["id"] != "five-hour" {
+		t.Fatalf("bucket order = %q/%q, want weekly/five-hour", buckets[0]["id"], buckets[1]["id"])
 	}
 	used := antigravityGroupUsedPercent(map[string]any{"buckets": buckets})
 	if used == nil || *used != 75 {
@@ -277,7 +280,7 @@ func TestBuildAntigravityGroupsSupportsSummaryBuckets(t *testing.T) {
 	}
 }
 
-func TestBuildAntigravityGroupsFallbackAddsBuckets(t *testing.T) {
+func TestBuildAntigravityGroupsRejectsLegacyModelsShape(t *testing.T) {
 	body := `{
 		"models": {
 			"claude-sonnet-4-6": {"quotaInfo": {"remainingFraction": 0.4, "resetTime": "2026-01-02T03:04:05Z"}},
@@ -285,18 +288,7 @@ func TestBuildAntigravityGroupsFallbackAddsBuckets(t *testing.T) {
 		}
 	}`
 
-	groups, err := buildAntigravityGroups(body)
-	if err != nil {
-		t.Fatalf("buildAntigravityGroups() error = %v", err)
-	}
-	if len(groups) == 0 {
-		t.Fatalf("groups len = 0, want fallback groups")
-	}
-	buckets, ok := groups[0]["buckets"].([]map[string]any)
-	if !ok || len(buckets) != 1 {
-		t.Fatalf("fallback buckets = %#v, want one compatibility bucket", groups[0]["buckets"])
-	}
-	if buckets[0]["remainingFraction"] != 0.4 {
-		t.Fatalf("fallback remainingFraction = %#v, want 0.4", buckets[0]["remainingFraction"])
+	if _, err := buildAntigravityGroups(body); err == nil {
+		t.Fatalf("buildAntigravityGroups() error = nil, want legacy models shape rejected")
 	}
 }

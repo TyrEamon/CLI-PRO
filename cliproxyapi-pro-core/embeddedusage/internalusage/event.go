@@ -111,10 +111,11 @@ func NormalizeRaw(raw []byte) (Event, error) {
 		rawJSON = string(redactedJSON)
 	}
 
-	timestampMS, timestamp := readTimestamp(record)
-	method := strings.ToUpper(readString(record, "method", "http_method", "httpMethod"))
-	path := readString(record, "path", "url_path", "urlPath", "route")
-	endpoint := readString(record, "endpoint", "api", "request", "operation")
+	_, exported := record["event_hash"]
+	timestampMS, timestamp := readTimestamp(record, exported)
+	method := strings.ToUpper(readString(record, "method"))
+	path := readString(record, "path")
+	endpoint := readString(record, "endpoint")
 	if endpoint == "" && method != "" && path != "" {
 		endpoint = method + " " + path
 	}
@@ -132,45 +133,42 @@ func NormalizeRaw(raw []byte) (Event, error) {
 		endpoint = "-"
 	}
 
-	inputTokens, outputTokens, reasoningTokens, cachedTokens, cacheTokens, totalTokens := readTokenFields(record)
+	inputTokens, outputTokens, reasoningTokens, cachedTokens, cacheTokens, totalTokens := readTokenFields(record, exported)
 	if totalTokens <= 0 {
 		totalTokens = inputTokens + outputTokens + reasoningTokens + maxInt64(cachedTokens, cacheTokens)
 	}
 
-	latencyMS := readOptionalInt(record, "latency_ms", "latencyMs", "duration_ms", "durationMs", "elapsed_ms", "elapsedMs")
-	ttftMS := readOptionalInt(record, "ttft_ms", "ttftMs", "time_to_first_token_ms", "timeToFirstTokenMs")
-	statusCode := readOptionalInt32(record, "status_code", "statusCode", "http_status", "httpStatus", "status")
-	fail := firstMap(record, "fail", "error")
+	latencyMS := readOptionalInt(record, "latency_ms")
+	ttftMS := readOptionalInt(record, "ttft_ms")
+	statusCode := readOptionalInt32(record, "status_code")
+	fail := firstMap(record, "fail")
 	if statusCode == nil && fail != nil {
-		statusCode = readOptionalInt32(fail, "status_code", "statusCode", "http_status", "httpStatus", "status")
+		statusCode = readOptionalInt32(fail, "status_code")
 	}
-	errorCode := readString(record, "error_code", "errorCode", "code")
-	errorMessage := readString(record, "error_message", "errorMessage", "message", "error")
+	errorCode := readString(record, "error_code")
+	errorMessage := readString(record, "error_message")
 	if fail != nil {
-		if errorCode == "" {
-			errorCode = readString(fail, "error_code", "errorCode", "code")
-		}
 		if errorMessage == "" {
-			errorMessage = readString(fail, "body", "message", "error_message", "errorMessage")
+			errorMessage = readString(fail, "body")
 		}
 	}
 	errorMessage = summarizeErrorMessage(errorMessage)
 	failed := readFailed(record)
-	sourceRaw := readString(record, "source", "api_key", "apiKey", "key", "account", "email")
+	sourceRaw := readString(record, "source")
 	source := maskSource(sourceRaw)
-	apiKey := readString(record, "api_key", "apiKey", "key")
-	authIndex := readString(record, "auth_index", "authIndex", "AuthIndex")
+	apiKey := readString(record, "api_key")
+	authIndex := readString(record, "auth_index")
 
 	event := Event{
-		RequestID:       readString(record, "request_id", "requestId", "id"),
+		RequestID:       readString(record, "request_id"),
 		TimestampMS:     timestampMS,
 		Timestamp:       timestamp,
-		Provider:        readString(record, "provider", "type", "auth_type", "authType"),
-		Model:           readString(record, "model", "model_name", "modelName"),
+		Provider:        readString(record, "provider"),
+		Model:           readString(record, "model"),
 		Endpoint:        endpoint,
 		Method:          method,
 		Path:            path,
-		AuthType:        readString(record, "auth_type", "authType"),
+		AuthType:        readString(record, "auth_type"),
 		AuthIndex:       authIndex,
 		Source:          source,
 		SourceHash:      hashString(sourceRaw),
@@ -186,8 +184,8 @@ func NormalizeRaw(raw []byte) (Event, error) {
 		StatusCode:      statusCode,
 		ErrorCode:       errorCode,
 		ErrorMessage:    errorMessage,
-		ReasoningEffort: readString(record, "reasoning_effort", "reasoningEffort"),
-		ServiceTier:     readString(record, "service_tier", "serviceTier"),
+		ReasoningEffort: readString(record, "reasoning_effort"),
+		ServiceTier:     readString(record, "service_tier"),
 		Failed:          failed,
 		RawJSON:         rawJSON,
 		CreatedAtMS:     time.Now().UnixMilli(),
@@ -259,8 +257,11 @@ func BuildPayload(events []Event) Payload {
 	return payload
 }
 
-func readTimestamp(record map[string]any) (int64, string) {
-	raw := first(record, "timestamp", "time", "created_at", "createdAt", "created", "request_time", "requestTime")
+func readTimestamp(record map[string]any, exported bool) (int64, string) {
+	raw := record["timestamp"]
+	if raw == nil && exported {
+		raw = record["timestamp_ms"]
+	}
 	now := time.Now()
 	if raw == nil {
 		return now.UnixMilli(), now.UTC().Format(time.RFC3339Nano)
@@ -289,50 +290,50 @@ func readTimestamp(record map[string]any) (int64, string) {
 	return now.UnixMilli(), now.UTC().Format(time.RFC3339Nano)
 }
 
-func readTokenFields(record map[string]any) (int64, int64, int64, int64, int64, int64) {
+func readTokenFields(record map[string]any, exported bool) (int64, int64, int64, int64, int64, int64) {
 	tokens := map[string]any{}
-	if nested, ok := first(record, "tokens", "usage").(map[string]any); ok {
+	if nested, ok := record["tokens"].(map[string]any); ok {
 		tokens = nested
 	}
-	input := readIntFrom(tokens, "input_tokens", "inputTokens", "prompt_tokens", "promptTokens")
-	if input == 0 {
-		input = readInt(record, "input_tokens", "inputTokens", "prompt_tokens", "promptTokens")
+	input := readIntFrom(tokens, "input_tokens")
+	if input == 0 && exported {
+		input = readInt(record, "input_tokens")
 	}
-	output := readIntFrom(tokens, "output_tokens", "outputTokens", "completion_tokens", "completionTokens")
-	if output == 0 {
-		output = readInt(record, "output_tokens", "outputTokens", "completion_tokens", "completionTokens")
+	output := readIntFrom(tokens, "output_tokens")
+	if output == 0 && exported {
+		output = readInt(record, "output_tokens")
 	}
-	reasoning := readIntFrom(tokens, "reasoning_tokens", "reasoningTokens")
-	if reasoning == 0 {
-		reasoning = readInt(record, "reasoning_tokens", "reasoningTokens")
+	reasoning := readIntFrom(tokens, "reasoning_tokens")
+	if reasoning == 0 && exported {
+		reasoning = readInt(record, "reasoning_tokens")
 	}
-	cached := readIntFrom(tokens, "cached_tokens", "cachedTokens")
-	if cached == 0 {
-		cached = readInt(record, "cached_tokens", "cachedTokens")
+	cached := readIntFrom(tokens, "cached_tokens")
+	if cached == 0 && exported {
+		cached = readInt(record, "cached_tokens")
 	}
-	cache := readIntFrom(tokens, "cache_tokens", "cacheTokens")
-	if cache == 0 {
-		cache = readInt(record, "cache_tokens", "cacheTokens")
+	cache := readIntFrom(tokens, "cache_read_tokens") + readIntFrom(tokens, "cache_creation_tokens")
+	if cache == 0 && exported {
+		cache = readInt(record, "cache_tokens")
 	}
-	total := readIntFrom(tokens, "total_tokens", "totalTokens", "total")
-	if total == 0 {
-		total = readInt(record, "total_tokens", "totalTokens", "total")
+	total := readIntFrom(tokens, "total_tokens")
+	if total == 0 && exported {
+		total = readInt(record, "total_tokens")
 	}
 	return input, output, reasoning, cached, cache, total
 }
 
 func readFailed(record map[string]any) bool {
-	if value, ok := first(record, "failed", "is_failed", "isFailed").(bool); ok {
+	if value, ok := record["failed"].(bool); ok {
 		return value
 	}
-	if value, ok := first(record, "success", "ok").(bool); ok {
-		return !value
-	}
-	status := readInt(record, "status", "status_code", "statusCode", "http_status", "httpStatus")
+	status := readInt(record, "status_code")
 	if status >= 400 {
 		return true
 	}
-	return first(record, "error", "error_message", "errorMessage") != nil
+	if fail := firstMap(record, "fail"); fail != nil {
+		return readInt(fail, "status_code") >= 400
+	}
+	return record["error_message"] != nil
 }
 
 func readOptionalInt32(record map[string]any, keys ...string) *int {

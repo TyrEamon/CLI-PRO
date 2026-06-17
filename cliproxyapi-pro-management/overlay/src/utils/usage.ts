@@ -17,6 +17,8 @@ export interface UsageTokens {
   output_tokens?: number;
   reasoning_tokens?: number;
   cached_tokens?: number;
+  cache_read_tokens?: number;
+  cache_creation_tokens?: number;
   cache_tokens?: number;
   total_tokens?: number;
 }
@@ -185,7 +187,7 @@ export function buildCandidateUsageSourceIds(input: {
 }
 
 export function extractLatencyMs(detail: unknown): number | null {
-  return extractNonNegativeNumberField(detail, ['latency_ms', 'latencyMs']);
+  return extractNonNegativeNumberField(detail, ['latency_ms']);
 }
 
 const extractNonNegativeNumberField = (detail: unknown, keys: string[]): number | null => {
@@ -205,13 +207,17 @@ const extractNonNegativeNumberField = (detail: unknown, keys: string[]): number 
 
 const readTokens = (detail: Record<string, unknown>): UsageTokens => {
   const tokensRaw = isRecord(detail.tokens) ? detail.tokens : {};
+  const cacheReadTokens = toFiniteNumber(tokensRaw.cache_read_tokens);
+  const cacheCreationTokens = toFiniteNumber(tokensRaw.cache_creation_tokens);
   return {
-    input_tokens: toFiniteNumber(tokensRaw.input_tokens ?? tokensRaw.inputTokens),
-    output_tokens: toFiniteNumber(tokensRaw.output_tokens ?? tokensRaw.outputTokens),
-    reasoning_tokens: toFiniteNumber(tokensRaw.reasoning_tokens ?? tokensRaw.reasoningTokens),
-    cached_tokens: toFiniteNumber(tokensRaw.cached_tokens ?? tokensRaw.cachedTokens),
-    cache_tokens: toFiniteNumber(tokensRaw.cache_tokens ?? tokensRaw.cacheTokens),
-    total_tokens: toFiniteNumber(tokensRaw.total_tokens ?? tokensRaw.totalTokens),
+    input_tokens: toFiniteNumber(tokensRaw.input_tokens),
+    output_tokens: toFiniteNumber(tokensRaw.output_tokens),
+    reasoning_tokens: toFiniteNumber(tokensRaw.reasoning_tokens),
+    cached_tokens: toFiniteNumber(tokensRaw.cached_tokens),
+    cache_read_tokens: cacheReadTokens,
+    cache_creation_tokens: cacheCreationTokens,
+    cache_tokens: toFiniteNumber(tokensRaw.cache_tokens) || cacheReadTokens + cacheCreationTokens,
+    total_tokens: toFiniteNumber(tokensRaw.total_tokens),
   };
 };
 
@@ -243,8 +249,8 @@ const buildUsageDetail = (
   const timestamp = detailRaw.timestamp;
   const timestampMs = parseTimestampMs(timestamp);
   const latencyMs = extractLatencyMs(detailRaw);
-  const ttftMs = extractNonNegativeNumberField(detailRaw, ['ttft_ms', 'ttftMs']);
-  const statusCode = extractNonNegativeNumberField(detailRaw, ['status_code', 'statusCode']);
+  const ttftMs = extractNonNegativeNumberField(detailRaw, ['ttft_ms']);
+  const statusCode = extractNonNegativeNumberField(detailRaw, ['status_code']);
 
   const provider = typeof detailRaw.provider === 'string' ? detailRaw.provider.trim() : undefined;
   const authType = typeof detailRaw.auth_type === 'string'
@@ -387,15 +393,17 @@ export function collectUsageDetailsWithEndpoint(usageData: unknown): UsageDetail
 export function extractTotalTokens(detail: unknown): number {
   const record = isRecord(detail) ? detail : null;
   const tokens = record && isRecord(record.tokens) ? record.tokens : {};
-  const explicitTotal = toFiniteNumber(tokens.total_tokens ?? tokens.totalTokens);
+  const explicitTotal = toFiniteNumber(tokens.total_tokens);
   if (explicitTotal > 0) return explicitTotal;
 
-  const inputTokens = toFiniteNumber(tokens.input_tokens ?? tokens.inputTokens);
-  const outputTokens = toFiniteNumber(tokens.output_tokens ?? tokens.outputTokens);
-  const reasoningTokens = toFiniteNumber(tokens.reasoning_tokens ?? tokens.reasoningTokens);
+  const inputTokens = toFiniteNumber(tokens.input_tokens);
+  const outputTokens = toFiniteNumber(tokens.output_tokens);
+  const reasoningTokens = toFiniteNumber(tokens.reasoning_tokens);
+  const cacheReadTokens = toFiniteNumber(tokens.cache_read_tokens);
+  const cacheCreationTokens = toFiniteNumber(tokens.cache_creation_tokens);
   const cachedTokens = Math.max(
-    toFiniteNumber(tokens.cached_tokens ?? tokens.cachedTokens),
-    toFiniteNumber(tokens.cache_tokens ?? tokens.cacheTokens)
+    toFiniteNumber(tokens.cached_tokens),
+    toFiniteNumber(tokens.cache_tokens) || cacheReadTokens + cacheCreationTokens
   );
 
   return inputTokens + outputTokens + reasoningTokens + cachedTokens;

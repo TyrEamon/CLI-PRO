@@ -65,7 +65,7 @@ internal/embeddedusage
 - `monitoring_settings` — 监控日志保留时间、WebDAV 备份配置和 WebDAV 备份保留天数。
 - `account_inspection_schedule` — 后端账号巡检调度设置。
 
-`/usage/import` 接受同样的 JSONL 格式。导入时会对每行只读取一次 `record_type`，导入 usage events，恢复模型价格、quota cache entries、监控设置，并在存在账号巡检调度记录时恢复调度设置。旧的 event-only JSONL 文件仍兼容。
+`/usage/import` 接受同样的 JSONL 格式。导入时会对每行只读取一次 `record_type`，导入 usage events，恢复模型价格、quota cache entries、监控设置，并在存在账号巡检调度记录时恢复调度设置。
 
 导入响应示例字段：
 
