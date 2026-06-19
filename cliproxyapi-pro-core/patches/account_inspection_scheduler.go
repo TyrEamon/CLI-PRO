@@ -3368,9 +3368,8 @@ func buildGeminiBuckets(body string) ([]map[string]any, *float64, error) {
 			continue
 		}
 		var remainingFraction *float64
-		if value, ok := floatFromAny(firstAny(bucket, "remainingFraction", "remaining_fraction")); ok {
-			normalized := normalizeFraction(value)
-			remainingFraction = &normalized
+		if value, ok := geminiCLIFractionFromAny(firstAny(bucket, "remainingFraction", "remaining_fraction")); ok {
+			remainingFraction = &value
 		}
 		var remainingAmount *float64
 		if value, ok := floatFromAny(firstAny(bucket, "remainingAmount", "remaining_amount")); ok {
@@ -3871,6 +3870,7 @@ func geminiCLIProjectID(auth *coreauth.Auth) string {
 		if value := firstNonEmptyStringValue(
 			stringFromAny(source["project_id"]),
 			stringFromAny(source["projectId"]),
+			stringFromAny(source["gemini_virtual_project"]),
 			stringFromAny(source["cloudaicompanionProject"]),
 		); value != "" {
 			return value
@@ -4078,6 +4078,24 @@ func anySlice(value any) []any {
 func normalizeGeminiCLIModelID(value string) string {
 	value = strings.TrimSpace(value)
 	return strings.TrimSuffix(value, "_vertex")
+}
+
+func geminiCLIFractionFromAny(value any) (float64, bool) {
+	if text, ok := value.(string); ok {
+		trimmed := strings.TrimSpace(text)
+		if strings.HasSuffix(trimmed, "%") {
+			parsed, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(trimmed, "%")), 64)
+			if err != nil {
+				return 0, false
+			}
+			return normalizeFraction(parsed / 100), true
+		}
+	}
+	parsed, ok := floatFromAny(value)
+	if !ok {
+		return 0, false
+	}
+	return normalizeFraction(parsed), true
 }
 
 func ignoredGeminiCLIModel(modelID string) bool {
