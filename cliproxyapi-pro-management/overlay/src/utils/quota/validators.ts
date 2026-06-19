@@ -72,7 +72,41 @@ export function resolveAuthProvider(file: AuthFileItem): string {
   const raw = file.provider ?? file.type ?? file.typo ?? '';
   const key = String(raw).trim().toLowerCase().replace(/_/g, '-');
   if (key === 'x-ai' || key === 'grok') return 'xai';
+  if (key === 'gemini' && hasGeminiCliProjectHint(file)) return 'gemini-cli';
   return key;
+}
+
+function hasGeminiCliProjectHint(file: AuthFileItem): boolean {
+  if (readStringValue(file.api_key ?? file.apiKey)) return false;
+  const metadata =
+    file && typeof file.metadata === 'object' && file.metadata !== null
+      ? (file.metadata as Record<string, unknown>)
+      : null;
+  const attributes =
+    file && typeof file.attributes === 'object' && file.attributes !== null
+      ? (file.attributes as Record<string, unknown>)
+      : null;
+  if (readStringValue(metadata?.api_key ?? metadata?.apiKey ?? attributes?.api_key ?? attributes?.apiKey)) {
+    return false;
+  }
+  const directCandidates = [
+    file.project_id,
+    file.projectId,
+    file.gemini_virtual_project,
+    file.cloudaicompanionProject,
+    metadata?.project_id,
+    metadata?.projectId,
+    metadata?.gemini_virtual_project,
+    metadata?.cloudaicompanionProject,
+    attributes?.project_id,
+    attributes?.projectId,
+    attributes?.gemini_virtual_project,
+    attributes?.cloudaicompanionProject
+  ];
+  if (directCandidates.some((candidate) => readStringValue(candidate))) return true;
+  return [file.account, file['account'], metadata?.account, attributes?.account].some(
+    (candidate) => /\([^()]+\)/.test(readStringValue(candidate))
+  );
 }
 
 export function isAntigravityFile(file: AuthFileItem): boolean {

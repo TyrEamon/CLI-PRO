@@ -444,6 +444,32 @@ func TestGeminiCLIProjectIDSupportsLatestProjectFields(t *testing.T) {
 	}
 }
 
+func TestAccountInspectionProviderPromotesGeminiOAuthProjectToGeminiCLI(t *testing.T) {
+	auth := &coreauth.Auth{
+		Provider: "gemini",
+		FileName: "gemini-oauth.json",
+		Attributes: map[string]string{
+			"path": "/auth/gemini-oauth.json",
+		},
+		Metadata: map[string]any{
+			"project_id": "oauth-project",
+		},
+	}
+
+	if got := accountInspectionProvider(auth); got != "gemini-cli" {
+		t.Fatalf("accountInspectionProvider() = %q, want gemini-cli", got)
+	}
+	account := accountFromAuth(auth)
+	if !shouldInspectAccount(account, accountInspectionProviderAll) {
+		t.Fatalf("shouldInspectAccount() = false, want gemini oauth project file inspectable")
+	}
+
+	auth.Attributes["api_key"] = "secret"
+	if got := accountInspectionProvider(auth); got != "gemini" {
+		t.Fatalf("accountInspectionProvider(api key) = %q, want gemini", got)
+	}
+}
+
 func TestBuildCodexWindowsClassifiesTeamMonthlyWindows(t *testing.T) {
 	body := `{
 		"rate_limit": {

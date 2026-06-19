@@ -1521,7 +1521,7 @@ func accountFromAuth(auth *coreauth.Auth) accountInspectionAccount {
 		return accountInspectionAccount{}
 	}
 	auth.EnsureIndex()
-	provider := strings.ToLower(strings.TrimSpace(auth.Provider))
+	provider := accountInspectionProvider(auth)
 	fileName := strings.TrimSpace(auth.FileName)
 	if fileName == "" {
 		fileName = strings.TrimSpace(auth.ID)
@@ -1543,6 +1543,18 @@ func accountFromAuth(auth *coreauth.Auth) accountInspectionAccount {
 		AuthIndex:   auth.Index,
 		Disabled:    auth.Disabled,
 	}
+}
+
+func accountInspectionProvider(auth *coreauth.Auth) string {
+	provider := strings.ToLower(strings.TrimSpace(auth.Provider))
+	if provider == "gemini" && !accountInspectionHasAPIKey(auth) && geminiCLIProjectID(auth) != "" {
+		return "gemini-cli"
+	}
+	return provider
+}
+
+func accountInspectionHasAPIKey(auth *coreauth.Auth) bool {
+	return strings.TrimSpace(authAttribute(auth, "api_key")) != ""
 }
 
 func isAccountInspectionAPIKeyAuth(auth *coreauth.Auth) bool {
