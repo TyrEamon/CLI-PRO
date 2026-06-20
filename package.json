@@ -1,0 +1,13 @@
+{
+  "name": "cliproxyapi-pro-galaxy",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Node.js launcher for deploying CLIProxyAPI Pro on Node-only Galaxy hosts.",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node scripts/galaxy-start.js",
+    "galaxy:check": "node scripts/galaxy-start.js --check"
+  }
+}

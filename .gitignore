@@ -1,0 +1,5 @@
+bin/
+usage/
+node_modules/
+config.yaml
+*.log
