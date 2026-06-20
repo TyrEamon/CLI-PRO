@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const fs = require("node:fs");
+const crypto = require("node:crypto");
 const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
@@ -350,6 +351,28 @@ function findExtractedFile(dir, fileName) {
   return "";
 }
 
+function randomAPIKey() {
+  return `cpak-${crypto.randomBytes(24).toString("base64url")}`;
+}
+
+function initialAPIKeys() {
+  const configured = splitList(process.env.API_KEYS || process.env.CLIPROXY_API_KEYS);
+  if (configured.length) {
+    return configured;
+  }
+  return [randomAPIKey(), randomAPIKey(), randomAPIKey()];
+}
+
+function writeConfigTemplateFromRelease(extractedConfigTemplate) {
+  let yaml = fs.readFileSync(extractedConfigTemplate, "utf8");
+  const keys = initialAPIKeys();
+  yaml = yaml.replace(
+    /^api-keys:\r?\n(?:\s+-\s+"your-api-key-\d+"\r?\n)+/m,
+    `${renderList("api-keys", keys)}\n`,
+  );
+  fs.writeFileSync(CONFIG_TEMPLATE_PATH, yaml.endsWith("\n") ? yaml : `${yaml}\n`);
+}
+
 async function ensureBinary() {
   if (
     fs.existsSync(BINARY_PATH)
@@ -392,7 +415,7 @@ async function ensureBinary() {
   if (!extractedConfigTemplate) {
     throw new Error("release archive did not contain config.example.yaml");
   }
-  fs.copyFileSync(extractedConfigTemplate, CONFIG_TEMPLATE_PATH);
+  writeConfigTemplateFromRelease(extractedConfigTemplate);
 
   return BINARY_PATH;
 }
