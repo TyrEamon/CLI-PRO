@@ -14,6 +14,7 @@ const DEFAULT_RELEASE_REPO = "ssfun/CLIProxyAPI-Pro";
 const DEFAULT_PANEL_REPO = "https://github.com/ssfun/CLIProxyAPI-Pro";
 const BINARY_NAME = process.platform === "win32" ? "cli-proxy-api.exe" : "cli-proxy-api";
 const BINARY_PATH = path.join(BIN_DIR, BINARY_NAME);
+const CONFIG_TEMPLATE_PATH = path.join(ROOT, "config.example.yaml");
 
 function log(message) {
   console.log(`[galaxy-start] ${message}`);
@@ -331,8 +332,30 @@ function findExtractedBinary(dir) {
   return "";
 }
 
+function findExtractedFile(dir, fileName) {
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      const found = findExtractedFile(fullPath, fileName);
+      if (found) {
+        return found;
+      }
+      continue;
+    }
+    if (entry.isFile() && entry.name === fileName) {
+      return fullPath;
+    }
+  }
+  return "";
+}
+
 async function ensureBinary() {
-  if (fs.existsSync(BINARY_PATH) && !envFlag("CLIPROXY_FORCE_DOWNLOAD", false)) {
+  if (
+    fs.existsSync(BINARY_PATH)
+    && fs.existsSync(CONFIG_TEMPLATE_PATH)
+    && !envFlag("CLIPROXY_FORCE_DOWNLOAD", false)
+  ) {
     return BINARY_PATH;
   }
 
@@ -364,6 +387,13 @@ async function ensureBinary() {
 
   fs.copyFileSync(extractedBinary, BINARY_PATH);
   fs.chmodSync(BINARY_PATH, 0o755);
+
+  const extractedConfigTemplate = findExtractedFile(tempDir, "config.example.yaml");
+  if (!extractedConfigTemplate) {
+    throw new Error("release archive did not contain config.example.yaml");
+  }
+  fs.copyFileSync(extractedConfigTemplate, CONFIG_TEMPLATE_PATH);
+
   return BINARY_PATH;
 }
 
