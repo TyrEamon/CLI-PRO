@@ -52,6 +52,12 @@ function isMyIpOnlyMode() {
   return envFlag("CLIPROXY_MY_IP_ONLY", false);
 }
 
+function isGitStoreEnabled() {
+  return Boolean(
+    (process.env.GITSTORE_GIT_URL || process.env.gitstore_git_url || "").trim(),
+  );
+}
+
 function runtimePorts() {
   const publicPort = parsePort(process.env.PORT || process.env.CLIPROXY_PORT || "8317", "PORT");
   if (!isMyIpRouteEnabled()) {
@@ -219,6 +225,14 @@ function ensureConfig(port) {
   return configPath;
 }
 
+function resolveConfigPath(port) {
+  if (isGitStoreEnabled()) {
+    log("GITSTORE_GIT_URL detected; CLIProxyAPI Pro will load config/auths from the git store");
+    return "";
+  }
+  return ensureConfig(port);
+}
+
 function platformAssetName(version) {
   if (process.platform !== "linux") {
     throw new Error(`Galaxy launcher downloads Linux releases only; current platform is ${process.platform}`);
@@ -374,7 +388,8 @@ function startBinary(binaryPath, configPath, appPort) {
     DEPLOY: process.env.DEPLOY || "cloud",
   };
 
-  const child = spawn(binaryPath, ["-config", configPath], {
+  const args = configPath ? ["-config", configPath] : [];
+  const child = spawn(binaryPath, args, {
     cwd: ROOT,
     env,
     stdio: "inherit",
@@ -532,7 +547,7 @@ async function main() {
   const checkOnly = process.argv.includes("--check");
   const myIpOnly = isMyIpOnlyMode();
   const ports = runtimePorts();
-  const configPath = ensureConfig(ports.appPort);
+  const configPath = resolveConfigPath(ports.appPort);
 
   if (checkOnly) {
     log("launcher check completed");
