@@ -33,6 +33,16 @@ function envFlag(name, defaultValue = false) {
   return /^(1|true|yes|on)$/i.test(raw.trim());
 }
 
+function envValue(...names) {
+  for (const name of names) {
+    const value = process.env[name];
+    if (value != null && value.trim() !== "") {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
 function parsePort(value, label) {
   const port = Number.parseInt(value, 10);
   if (!Number.isInteger(port) || port <= 0 || port > 65535) {
@@ -55,9 +65,7 @@ function isMyIpOnlyMode() {
 }
 
 function isGitStoreEnabled() {
-  return Boolean(
-    (process.env.GITSTORE_GIT_URL || process.env.gitstore_git_url || "").trim(),
-  );
+  return Boolean(envValue("GITSTORE_GIT_URL", "gitstore_git_url"));
 }
 
 function runtimePorts() {
@@ -366,11 +374,136 @@ function initialAPIKeys() {
 function writeConfigTemplateFromRelease(extractedConfigTemplate) {
   let yaml = fs.readFileSync(extractedConfigTemplate, "utf8");
   const keys = initialAPIKeys();
-  yaml = yaml.replace(
-    /^api-keys:\r?\n(?:\s+-\s+"your-api-key-\d+"\r?\n)+/m,
+  yaml = replaceExampleAPIKeys(yaml, keys);
+  fs.writeFileSync(CONFIG_TEMPLATE_PATH, yaml.endsWith("\n") ? yaml : `${yaml}\n`);
+}
+
+function replaceExampleAPIKeys(yaml, keys) {
+  return yaml.replace(
+    /^api-keys:\r?\n(?:[ \t]+-[ \t]+["']?your-api-key-\d+["']?[^\r\n]*\r?\n)+/m,
     `${renderList("api-keys", keys)}\n`,
   );
-  fs.writeFileSync(CONFIG_TEMPLATE_PATH, yaml.endsWith("\n") ? yaml : `${yaml}\n`);
+}
+
+function parseGitHubRepoFromURL(rawURL) {
+  const value = rawURL.trim();
+  let match = value.match(/^git@github\.com:([^/]+)\/(.+?)(?:\.git)?$/i);
+  if (match) {
+    return { owner: match[1], repo: match[2] };
+  }
+
+  try {
+    const parsed = new URL(value);
+    if (!parsed.hostname.toLowerCase().endsWith("github.com")) {
+      return null;
+    }
+    const parts = parsed.pathname.replace(/^\/+/, "").replace(/\.git$/i, "").split("/");
+    if (parts.length >= 2) {
+      return { owner: parts[0], repo: parts[1] };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function githubRequest(pathname, options = {}) {
+  const token = envValue("GITSTORE_GIT_TOKEN", "gitstore_git_token");
+  if (!token) {
+    throw new Error("GITSTORE_GIT_TOKEN is required to update git-backed config");
+  }
+
+  const response = await fetch(`https://api.github.com${pathname}`, {
+    ...options,
+    headers: {
+      "User-Agent": "cliproxyapi-pro-galaxy-launcher",
+      "Accept": "application/vnd.github+json",
+      "Authorization": `Bearer ${token}`,
+      "X-GitHub-Api-Version": "2022-11-28",
+      ...(options.headers || {}),
+    },
+  });
+
+  if (response.status === 404) {
+    return { response, json: null };
+  }
+  const text = await response.text();
+  const json = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    const message = json && json.message ? json.message : `${response.status} ${response.statusText}`;
+    throw new Error(`GitHub API request failed: ${message}`);
+  }
+  return { response, json };
+}
+
+function decodeBase64Content(content) {
+  return Buffer.from(String(content || "").replace(/\s/g, ""), "base64").toString("utf8");
+}
+
+async function resolveGitStoreBranch(owner, repo) {
+  const configured = envValue("GITSTORE_GIT_BRANCH", "gitstore_git_branch");
+  if (configured) {
+    return configured;
+  }
+  const { json } = await githubRequest(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`);
+  return (json && json.default_branch) || "main";
+}
+
+async function ensureGitStoreAPIKeys() {
+  const gitURL = envValue("GITSTORE_GIT_URL", "gitstore_git_url");
+  if (!gitURL) {
+    return;
+  }
+  if (!envValue("GITSTORE_GIT_TOKEN", "gitstore_git_token")) {
+    log("GITSTORE_GIT_TOKEN is not set; skipping API key bootstrap update");
+    return;
+  }
+  const repoInfo = parseGitHubRepoFromURL(gitURL);
+  if (!repoInfo) {
+    log("git store is not a github.com repository; skipping API key bootstrap update");
+    return;
+  }
+
+  const { owner, repo } = repoInfo;
+  const branch = await resolveGitStoreBranch(owner, repo);
+  const configPath = "config/config.yaml";
+  const encodedPath = configPath.split("/").map(encodeURIComponent).join("/");
+  const { response, json } = await githubRequest(
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodedPath}?ref=${encodeURIComponent(branch)}`,
+  );
+  if (response.status === 404) {
+    log("git store config/config.yaml not found yet; CLIProxyAPI Pro will initialize it from the randomized template");
+    return;
+  }
+  if (!json || json.type !== "file" || !json.content || !json.sha) {
+    log("git store config/config.yaml is not a normal file; skipping API key bootstrap update");
+    return;
+  }
+
+  const yaml = decodeBase64Content(json.content);
+  if (!/^\s*-\s*["']?your-api-key-\d+["']?/m.test(yaml)) {
+    return;
+  }
+
+  const updated = replaceExampleAPIKeys(yaml, initialAPIKeys());
+  if (updated === yaml) {
+    return;
+  }
+
+  await githubRequest(
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodedPath}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: "Replace example API keys",
+        content: Buffer.from(updated).toString("base64"),
+        sha: json.sha,
+        branch,
+      }),
+    },
+  );
+  log(`replaced example API keys in ${owner}/${repo}:${configPath}`);
 }
 
 async function ensureBinary() {
@@ -613,6 +746,7 @@ async function main() {
     return;
   }
 
+  await ensureGitStoreAPIKeys();
   const binaryPath = await ensureBinary();
   startBinary(binaryPath, configPath, ports.appPort);
   if (isMyIpRouteEnabled()) {
