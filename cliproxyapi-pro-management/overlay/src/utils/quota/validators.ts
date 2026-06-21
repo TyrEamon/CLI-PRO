@@ -5,29 +5,29 @@
 import type { AuthFileItem } from '@/types';
 import { normalizeNumberValue } from './parsers';
 
-export type QuotaProviderType = 'antigravity' | 'claude' | 'codex' | 'kimi' | 'xai';
+export type QuotaProviderType = 'antigravity' | 'claude' | 'codex' | 'gemini-cli' | 'kimi';
 
 type QuotaProviderMetadata = {
   quotaMapName:
     | 'antigravityQuota'
     | 'claudeQuota'
     | 'codexQuota'
-    | 'kimiQuota'
-    | 'xaiQuota';
+    | 'geminiCliQuota'
+    | 'kimiQuota';
   setterName:
     | 'setAntigravityQuota'
     | 'setClaudeQuota'
     | 'setCodexQuota'
-    | 'setKimiQuota'
-    | 'setXaiQuota';
+    | 'setGeminiCliQuota'
+    | 'setKimiQuota';
 };
 
 export const QUOTA_PROVIDER_METADATA: Record<QuotaProviderType, QuotaProviderMetadata> = {
   antigravity: { quotaMapName: 'antigravityQuota', setterName: 'setAntigravityQuota' },
   claude: { quotaMapName: 'claudeQuota', setterName: 'setClaudeQuota' },
   codex: { quotaMapName: 'codexQuota', setterName: 'setCodexQuota' },
+  'gemini-cli': { quotaMapName: 'geminiCliQuota', setterName: 'setGeminiCliQuota' },
   kimi: { quotaMapName: 'kimiQuota', setterName: 'setKimiQuota' },
-  xai: { quotaMapName: 'xaiQuota', setterName: 'setXaiQuota' },
 };
 
 export const QUOTA_PROVIDER_TYPES = Object.keys(QUOTA_PROVIDER_METADATA) as QuotaProviderType[];
@@ -94,6 +94,16 @@ export function isClaudeOAuthFile(file: AuthFileItem): boolean {
 
 export function isCodexFile(file: AuthFileItem): boolean {
   return resolveAuthProvider(file) === 'codex';
+}
+
+export function isGeminiCliFile(file: AuthFileItem): boolean {
+  return resolveAuthProvider(file) === 'gemini-cli';
+}
+
+export function isIgnoredGeminiCliModel(modelId: unknown): boolean {
+  const normalized = readStringValue(modelId).toLowerCase();
+  if (!normalized) return true;
+  return normalized.includes('embedding') || normalized.includes('aqa');
 }
 
 export function isKimiFile(file: AuthFileItem): boolean {

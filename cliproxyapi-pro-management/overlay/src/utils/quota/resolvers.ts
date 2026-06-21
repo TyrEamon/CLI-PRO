@@ -126,6 +126,45 @@ export function resolveCodexPlanType(file: AuthFileItem): string | null {
   return null;
 }
 
+export function resolveGeminiCliProjectId(file: AuthFileItem): string | null {
+  const metadata = toRecord(file.metadata);
+  const attributes = toRecord(file.attributes);
+  const installed = toRecord(file.installed);
+  const web = toRecord(file.web);
+  const metadataInstalled = toRecord(metadata?.installed);
+  const metadataWeb = toRecord(metadata?.web);
+  const attributesInstalled = toRecord(attributes?.installed);
+  const attributesWeb = toRecord(attributes?.web);
+
+  const candidates = [
+    file.project_id,
+    file.projectId,
+    metadata?.project_id,
+    metadata?.projectId,
+    attributes?.project_id,
+    attributes?.projectId,
+    installed?.project_id,
+    installed?.projectId,
+    web?.project_id,
+    web?.projectId,
+    metadataInstalled?.project_id,
+    metadataInstalled?.projectId,
+    metadataWeb?.project_id,
+    metadataWeb?.projectId,
+    attributesInstalled?.project_id,
+    attributesInstalled?.projectId,
+    attributesWeb?.project_id,
+    attributesWeb?.projectId,
+  ];
+
+  for (const candidate of candidates) {
+    const projectId = normalizeStringValue(candidate);
+    if (projectId) return projectId;
+  }
+
+  return null;
+}
+
 const normalizeDateLikeValue = (value: unknown): string | number | null => {
   const numberValue = normalizeNumberValue(value);
   if (numberValue === 0) return null;

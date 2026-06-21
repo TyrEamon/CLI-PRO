@@ -67,7 +67,7 @@ type ManualAccountInspectionAction = Exclude<AccountInspectionAction, 'keep'>;
 
 type QuotaAccountStatsState = Pick<
   ReturnType<typeof useQuotaStore.getState>,
-  'antigravityQuota' | 'claudeQuota' | 'codexQuota' | 'kimiQuota' | 'xaiQuota'
+  'antigravityQuota' | 'claudeQuota' | 'codexQuota' | 'kimiQuota'
 >;
 
 type HealthCounts = {
@@ -656,13 +656,6 @@ const isAntigravityQuotaLow = (
   return used !== null && used >= usedPercentThreshold;
 };
 
-const isXaiQuotaLow = (quota: unknown, usedPercentThreshold: number) => {
-  if (!isRecordValue(quota) || quota.status !== 'success') return false;
-  if (!isRecordValue(quota.billing)) return false;
-  const used = normalizeNumberValue(quota.billing.usedPercent ?? quota.billing.used_percent);
-  return used !== null && used >= usedPercentThreshold;
-};
-
 const isProviderQuotaLow = (
   provider: string,
   quotaStore: QuotaAccountStatsState,
@@ -679,8 +672,6 @@ const isProviderQuotaLow = (
       return isQuotaLowState(quotaStore.codexQuota[fileName], usedPercentThreshold);
     case 'kimi':
       return isQuotaLowState(quotaStore.kimiQuota[fileName], usedPercentThreshold);
-    case 'xai':
-      return isXaiQuotaLow(quotaStore.xaiQuota[fileName], usedPercentThreshold);
     default:
       return false;
   }
@@ -1526,7 +1517,6 @@ export function AccountInspectionPage() {
   const claudeQuota = useQuotaStore((state) => state.claudeQuota);
   const codexQuota = useQuotaStore((state) => state.codexQuota);
   const kimiQuota = useQuotaStore((state) => state.kimiQuota);
-  const xaiQuota = useQuotaStore((state) => state.xaiQuota);
 
   const [backendState, dispatchBackendState] = useReducer(
     inspectionBackendReducer,
@@ -2177,8 +2167,8 @@ export function AccountInspectionPage() {
 
 
   const quotaStore = useMemo(
-    () => ({ antigravityQuota, claudeQuota, codexQuota, kimiQuota, xaiQuota }),
-    [antigravityQuota, claudeQuota, codexQuota, kimiQuota, xaiQuota]
+    () => ({ antigravityQuota, claudeQuota, codexQuota, kimiQuota }),
+    [antigravityQuota, claudeQuota, codexQuota, kimiQuota]
   );
 
   useEffect(() => {

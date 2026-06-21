@@ -297,10 +297,10 @@ class QuotaPersistenceMiddleware {
       case 'claude':
       case 'codex':
         return Array.isArray(data.windows);
+      case 'gemini-cli':
+        return Array.isArray(data.buckets);
       case 'kimi':
         return Array.isArray(data.rows);
-      case 'xai':
-        return isRecordValue(data.billing);
       default:
         return false;
     }

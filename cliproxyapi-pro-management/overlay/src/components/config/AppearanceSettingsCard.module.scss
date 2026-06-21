@@ -1,0 +1,182 @@
+@use '../../styles/variables' as *;
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: clamp(18px, 2.4vw, 24px);
+  border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--primary-color) 10%, transparent), transparent 36%),
+    color-mix(in srgb, var(--bg-primary) 78%, transparent);
+  box-shadow: var(--shadow);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.eyebrow {
+  margin-bottom: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.description,
+.footnote {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.urlGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+
+  :global(.form-group) {
+    margin-bottom: 0;
+  }
+}
+
+.tuningGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.rangeField {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+}
+
+.rangeHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+
+  strong {
+    color: var(--primary-color);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+}
+
+.rangeField input[type='range'] {
+  width: 100%;
+  min-height: 32px;
+  accent-color: var(--primary-color);
+  cursor: pointer;
+}
+
+.previewGrid {
+  --preview-opacity: 0.52;
+  --preview-overlay: 0.5;
+  --preview-blur: 0px;
+
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+
+.previewTile {
+  position: relative;
+  min-height: 120px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+  border-radius: 20px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--bg-secondary) 92%, transparent), var(--bg-primary)),
+    linear-gradient(120deg, color-mix(in srgb, var(--primary-color) 14%, transparent), transparent);
+  background-position: center;
+  background-size: cover;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: calc(-1 * var(--preview-blur));
+    background: inherit;
+    background-position: center;
+    background-size: cover;
+    filter: blur(var(--preview-blur));
+    opacity: var(--preview-opacity);
+  }
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgb(0 0 0 / var(--preview-overlay));
+  }
+
+  span {
+    position: absolute;
+    left: 14px;
+    bottom: 14px;
+    z-index: 1;
+    display: inline-flex;
+    min-height: 30px;
+    align-items: center;
+    padding: 0 12px;
+    border: 1px solid rgb(255 255 255 / 0.24);
+    border-radius: 999px;
+    background: rgb(0 0 0 / 0.42);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 800;
+  }
+}
+
+@media (max-width: $breakpoint-mobile) {
+  .header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .actions {
+    justify-content: stretch;
+
+    button {
+      flex: 1;
+    }
+  }
+
+  .urlGrid,
+  .tuningGrid,
+  .previewGrid {
+    grid-template-columns: 1fr;
+  }
+}
