@@ -52,7 +52,7 @@ _writes = {}
 def read(path: Path) -> str:
     if path in _writes:
         return _writes[path]
-    return path.read_text(encoding='utf-8')
+    return path.read_text()
 
 
 def write(path: Path, text: str) -> None:
@@ -61,7 +61,7 @@ def write(path: Path, text: str) -> None:
 
 def flush_writes() -> None:
     for path, text in _writes.items():
-        path.write_text(text, encoding='utf-8')
+        path.write_text(text)
 
 
 def replace_once(path: Path, old: str, new: str) -> None:
@@ -205,56 +205,6 @@ def patch_layout(target: Path) -> None:
         "            <PageTransition\n",
         "            <QuotaPersistenceBootstrap />\n            <PageTransition\n",
     )
-    insert_once(
-        path,
-        "import { triggerHeaderRefresh } from '@/hooks/useHeaderRefresh';\n",
-        "import { triggerHeaderRefresh } from '@/hooks/useHeaderRefresh';\nimport {\n  APPEARANCE_CHANGE_EVENT,\n  getAppearanceBackgroundCssUrl,\n  loadAppearanceSettings,\n  saveAppearanceSettings,\n  type AppearanceSettings,\n} from '@/extensions/appearance/background';\n",
-        "getAppearanceBackgroundCssUrl",
-    )
-    insert_once(
-        path,
-        "  whiteTheme: (\n",
-        "  customBackground: (\n    <svg {...headerIconProps}>\n      <rect x=\"4\" y=\"5\" width=\"16\" height=\"14\" rx=\"2\" />\n      <circle cx=\"9\" cy=\"10\" r=\"1.4\" />\n      <path d=\"m5 17 4.2-4.2 2.7 2.7 2.1-2.1L19 18\" />\n    </svg>\n  ),\n  whiteTheme: (\n",
-        "customBackground: (",
-    )
-    insert_once(
-        path,
-        "  const [themeMenuOpen, setThemeMenuOpen] = useState(false);\n",
-        "  const [themeMenuOpen, setThemeMenuOpen] = useState(false);\n  const [appearanceSettings, setAppearanceSettings] = useState<AppearanceSettings>(() =>\n    loadAppearanceSettings()\n  );\n",
-        "setAppearanceSettings",
-    )
-    insert_once(
-        path,
-        "  const showSidebarLabels = !sidebarCollapsed || sidebarOpen;\n",
-        "  const showSidebarLabels = !sidebarCollapsed || sidebarOpen;\n  const customBackgroundPreview = appearanceSettings.appBackgroundUrl;\n  const customBackgroundPreviewImage = getAppearanceBackgroundCssUrl(customBackgroundPreview);\n",
-        "customBackgroundPreview",
-    )
-    insert_once(
-        path,
-        "  const toggleLanguageMenu = useCallback(() => {\n",
-        "  useEffect(() => {\n    const handleAppearanceChange = (event: Event) => {\n      const nextSettings =\n        event instanceof CustomEvent && event.detail\n          ? (event.detail as AppearanceSettings)\n          : loadAppearanceSettings();\n      setAppearanceSettings(nextSettings);\n    };\n\n    window.addEventListener(APPEARANCE_CHANGE_EVENT, handleAppearanceChange);\n    return () => window.removeEventListener(APPEARANCE_CHANGE_EVENT, handleAppearanceChange);\n  }, []);\n\n  const toggleLanguageMenu = useCallback(() => {\n",
-        "handleAppearanceChange",
-    )
-    replace_once(
-        path,
-        "  const handleThemeSelect = useCallback(\n    (nextTheme: Theme) => {\n      setTheme(nextTheme);\n      setThemeMenuOpen(false);\n    },\n    [setTheme]\n  );\n",
-        "  const handleThemeSelect = useCallback(\n    (nextTheme: Theme) => {\n      setAppearanceSettings(saveAppearanceSettings({ ...loadAppearanceSettings(), enabled: false }));\n      setTheme(nextTheme);\n      setThemeMenuOpen(false);\n    },\n    [setTheme]\n  );\n\n  const handleCustomBackgroundSelect = useCallback(() => {\n    setAppearanceSettings(saveAppearanceSettings({ ...loadAppearanceSettings(), enabled: true }));\n    setThemeMenuOpen(false);\n  }, []);\n",
-    )
-    replace_once(
-        path,
-        "              {theme === 'auto'\n                ? headerIcons.autoTheme\n                : theme === 'dark'\n                  ? headerIcons.moon\n                  : theme === 'white'\n                    ? headerIcons.whiteTheme\n                    : headerIcons.sun}\n",
-        "              {appearanceSettings.enabled\n                ? headerIcons.customBackground\n                : theme === 'auto'\n                  ? headerIcons.autoTheme\n                  : theme === 'dark'\n                    ? headerIcons.moon\n                    : theme === 'white'\n                      ? headerIcons.whiteTheme\n                      : headerIcons.sun}\n",
-    )
-    replace_once(
-        path,
-        "                {THEME_CARDS.map((tc) => (\n                  <button\n                    key={tc.key}\n                    type=\"button\"\n                    className={`theme-card ${theme === tc.key ? 'active' : ''}`}\n                    onClick={() => handleThemeSelect(tc.key)}\n                    role=\"menuitemradio\"\n                    aria-checked={theme === tc.key}\n                  >\n",
-        "                {THEME_CARDS.map((tc) => (\n                  <button\n                    key={tc.key}\n                    type=\"button\"\n                    className={`theme-card ${!appearanceSettings.enabled && theme === tc.key ? 'active' : ''}`}\n                    onClick={() => handleThemeSelect(tc.key)}\n                    role=\"menuitemradio\"\n                    aria-checked={!appearanceSettings.enabled && theme === tc.key}\n                  >\n",
-    )
-    replace_once(
-        path,
-        "                    <span className=\"theme-card-label\">{t(tc.labelKey)}</span>\n                  </button>\n                ))}\n              </div>\n",
-        "                    <span className=\"theme-card-label\">{t(tc.labelKey)}</span>\n                  </button>\n                ))}\n                <button\n                  key=\"custom-background\"\n                  type=\"button\"\n                  className={`theme-card pro-background-theme-card ${appearanceSettings.enabled ? 'active' : ''}`}\n                  onClick={handleCustomBackgroundSelect}\n                  role=\"menuitemradio\"\n                  aria-checked={appearanceSettings.enabled}\n                >\n                  <div\n                    className=\"theme-card-preview\"\n                    style={{\n                      background: customBackgroundPreviewImage !== 'none'\n                        ? `linear-gradient(rgb(0 0 0 / 0.35), rgb(0 0 0 / 0.35)), ${customBackgroundPreviewImage} center / cover`\n                        : 'linear-gradient(135deg, #111827, #365314 48%, #f7f5ef 100%)',\n                      border: '1px solid color-mix(in srgb, var(--primary-color) 62%, var(--border-color))',\n                    }}\n                  >\n                    <div\n                      className=\"theme-card-header\"\n                      style={{ background: 'rgb(255 255 255 / 0.18)', borderBottom: '1px solid rgb(255 255 255 / 0.16)' }}\n                    />\n                    <div className=\"theme-card-body\">\n                      <div\n                        className=\"theme-card-sidebar\"\n                        style={{ background: 'rgb(0 0 0 / 0.24)', borderRight: '1px solid rgb(255 255 255 / 0.14)' }}\n                      />\n                      <div className=\"theme-card-content\" style={{ background: 'transparent' }}>\n                        <div className=\"theme-card-line\" style={{ background: 'rgb(255 255 255 / 0.72)' }} />\n                        <div className=\"theme-card-line short\" style={{ background: 'rgb(255 255 255 / 0.52)' }} />\n                      </div>\n                    </div>\n                  </div>\n                  <span className=\"theme-card-label\">\n                    {t('theme.custom_background', { defaultValue: '\\u81ea\\u5b9a\\u4e49\\u80cc\\u666f' })}\n                  </span>\n                </button>\n              </div>\n",
-    )
 
 def patch_icons(target: Path) -> None:
     path = target / 'src/components/ui/icons.tsx'
@@ -278,10 +228,6 @@ def patch_quota_types(target: Path) -> None:
             "  errorStatus?: number;\n  cachedAt?: number;\n}\n\nexport interface CodexQuotaWindow",
         ),
         (
-            "  errorStatus?: number;\n}\n\nexport interface GeminiCliQuotaBucketState",
-            "  errorStatus?: number;\n  cachedAt?: number;\n}\n\nexport interface GeminiCliQuotaBucketState",
-        ),
-        (
             "  errorStatus?: number;\n}\n\n// Kimi API payload types",
             "  errorStatus?: number;\n  cachedAt?: number;\n}\n\n// Kimi API payload types",
         ),
@@ -294,8 +240,7 @@ def patch_quota_types(target: Path) -> None:
             "export interface XaiQuotaState {\n  status: 'idle' | 'loading' | 'success' | 'error';\n  billing: XaiBillingSummary | null;\n  error?: string;\n  errorStatus?: number;\n  cachedAt?: number;\n}",
         ),
     ]:
-        if old in read(path):
-            replace_once(path, old, new)
+        replace_once(path, old, new)
 
 
 def patch_quota_configs(target: Path) -> None:
@@ -310,11 +255,6 @@ def patch_quota_configs(target: Path) -> None:
             'setAntigravityQuota',
             "    serverTimeOffsetMs: data.serverTimeOffsetMs,\n  }),",
             "    serverTimeOffsetMs: data.serverTimeOffsetMs,\n    cachedAt: Date.now(),\n  }),",
-        ),
-        (
-            'setAntigravityQuota',
-            "  buildSuccessState: (groups) => ({ status: 'success', groups }),",
-            "  buildSuccessState: (groups) => ({ status: 'success', groups, cachedAt: Date.now() }),",
         ),
         (
             'setCodexQuota',
@@ -332,9 +272,7 @@ def patch_quota_configs(target: Path) -> None:
             "  buildSuccessState: (billing) => ({ status: 'success', billing, cachedAt: Date.now() }),",
         ),
     ]:
-        text = read(path)
-        if f"  storeSetter: '{store_setter}'," in text and old in text:
-            replace_once_in_quota_config(path, store_setter, old, new)
+        replace_once_in_quota_config(path, store_setter, old, new)
     for old, new in [
         (
             "  const groups = quota.groups ?? [];\n",
@@ -345,8 +283,7 @@ def patch_quota_configs(target: Path) -> None:
             "        ...(Array.isArray(group.buckets) ? group.buckets : []).map((bucket) => {\n",
         ),
     ]:
-        if old in read(path):
-            replace_once(path, old, new)
+        replace_once(path, old, new)
 
 
 def patch_quota_page(target: Path) -> None:
@@ -361,20 +298,11 @@ def patch_quota_page(target: Path) -> None:
         "import { useAuthStore } from '@/stores';\n",
         "import { quotaPersistenceMiddleware } from '@/extensions/quota/persistenceMiddleware';\nimport { useAuthStore } from '@/stores';\n",
     )
-    text = read(path)
-    if "void quotaPersistenceMiddleware.ensureFresh();" not in text:
-        if "  useEffect(() => {\n    loadFiles();\n  }, [loadFiles]);\n" in text:
-            replace_once(
-                path,
-                "  useEffect(() => {\n    loadFiles();\n  }, [loadFiles]);\n",
-                "  useEffect(() => {\n    loadFiles();\n    void quotaPersistenceMiddleware.ensureFresh();\n  }, [loadFiles]);\n",
-            )
-        else:
-            replace_once(
-                path,
-                "  useEffect(() => {\n    loadFiles();\n    loadConfig();\n  }, [loadFiles, loadConfig]);\n",
-                "  useEffect(() => {\n    loadFiles();\n    loadConfig();\n    void quotaPersistenceMiddleware.ensureFresh();\n  }, [loadFiles, loadConfig]);\n",
-            )
+    replace_once(
+        path,
+        "  useEffect(() => {\n    loadFiles();\n  }, [loadFiles]);\n",
+        "  useEffect(() => {\n    loadFiles();\n    void quotaPersistenceMiddleware.ensureFresh();\n  }, [loadFiles]);\n",
+    )
     replace_all(
         path,
         "\n  useEffect(() => {\n    if (!FEATURES.QUOTA_PERSISTENCE) return;\n    quotaPersistenceMiddleware.start();\n    return () => quotaPersistenceMiddleware.stop();\n  }, []);\n",
@@ -404,8 +332,6 @@ def patch_quota_card(target: Path) -> None:
 
 def patch_antigravity_quota_builders(target: Path) -> None:
     path = target / 'src/utils/quota/builders.ts'
-    if "function getAntigravityWindowOrder" not in read(path):
-        return
     insert_once(
         path,
         "\nfunction getAntigravityWindowOrder(bucket: AntigravityQuotaBucket): number {\n",
@@ -429,60 +355,22 @@ def patch_quota_styles(target: Path) -> None:
 
 
 def patch_supporting_api_and_types(target: Path) -> None:
-    global_styles_path = target / 'src/styles/global.scss'
-    insert_once(
-        global_styles_path,
-        "@use './layout.scss';\n",
-        "@use './layout.scss';\n@use './pro-background.scss';\n",
-        "@use './pro-background.scss';",
-    )
-
-    main_path = target / 'src/main.tsx'
-    insert_once(
-        main_path,
-        "import '@/styles/global.scss';\n",
-        "import '@/styles/global.scss';\nimport '@/extensions/appearance/background';\n",
-        "import '@/extensions/appearance/background';",
-    )
-
-    config_page_path = target / 'src/pages/ConfigPage.tsx'
-    replace_once(
-        config_page_path,
-        "import { VisualConfigEditor } from '@/components/config/VisualConfigEditor';\n",
-        "import { VisualConfigEditor } from '@/components/config/VisualConfigEditor';\nimport { AppearanceSettingsCard } from '@/components/config/AppearanceSettingsCard';\n",
-    )
-    replace_once(
-        config_page_path,
-        "          {activeTab === 'visual' ? (\n            <VisualConfigEditor\n              values={visualValues}\n              validationErrors={visualValidationErrors}\n              hasPayloadValidationErrors={visualHasPayloadValidationErrors}\n              disabled={disableControls || loading}\n              onChange={setVisualValues}\n            />\n          ) : (\n",
-        "          {activeTab === 'visual' ? (\n            <>\n              <AppearanceSettingsCard />\n              <VisualConfigEditor\n                values={visualValues}\n                validationErrors={visualValidationErrors}\n                hasPayloadValidationErrors={visualHasPayloadValidationErrors}\n                disabled={disableControls || loading}\n                onChange={setVisualValues}\n              />\n            </>\n          ) : (\n",
-    )
-
     config_path = target / 'src/types/config.ts'
     replace_once(
         config_path,
         "export interface Config {\n  debug?: boolean;\n",
         "export interface AuthPoolCleanConfig {\n  baseUrl?: string;\n  token?: string;\n  targetType?: string;\n  workers?: number;\n  deleteWorkers?: number;\n  timeout?: number;\n  retries?: number;\n  usedPercentThreshold?: number;\n  sampleSize?: number;\n}\n\nexport interface Config {\n  debug?: boolean;\n",
     )
-    if 'clean?: AuthPoolCleanConfig;' not in read(config_path):
-        text = read(config_path)
-        if "  quotaExceeded?: QuotaExceededConfig;\n  usageStatisticsEnabled?: boolean;\n" in text:
-            replace_once(
-                config_path,
-                "  quotaExceeded?: QuotaExceededConfig;\n  usageStatisticsEnabled?: boolean;\n",
-                "  quotaExceeded?: QuotaExceededConfig;\n  clean?: AuthPoolCleanConfig;\n  usageStatisticsEnabled?: boolean;\n",
-            )
-        else:
-            replace_once(
-                config_path,
-                "  quotaExceeded?: QuotaExceededConfig;\n  requestLog?: boolean;\n",
-                "  quotaExceeded?: QuotaExceededConfig;\n  clean?: AuthPoolCleanConfig;\n  usageStatisticsEnabled?: boolean;\n  requestLog?: boolean;\n",
-            )
-    if "  | 'usage-statistics-enabled'\n" not in read(config_path):
-        replace_once(
-            config_path,
-            "  | 'quota-exceeded'\n  | 'request-log'\n",
-            "  | 'quota-exceeded'\n  | 'usage-statistics-enabled'\n  | 'request-log'\n",
-        )
+    replace_once(
+        config_path,
+        "  quotaExceeded?: QuotaExceededConfig;\n  requestLog?: boolean;\n",
+        "  quotaExceeded?: QuotaExceededConfig;\n  clean?: AuthPoolCleanConfig;\n  usageStatisticsEnabled?: boolean;\n  requestLog?: boolean;\n",
+    )
+    replace_once(
+        config_path,
+        "  | 'quota-exceeded'\n  | 'request-log'\n",
+        "  | 'quota-exceeded'\n  | 'usage-statistics-enabled'\n  | 'request-log'\n",
+    )
 
     auth_file_type_path = target / 'src/types/authFile.ts'
     replace_once(
@@ -520,20 +408,11 @@ def patch_supporting_api_and_types(target: Path) -> None:
         "  list: async () => dedupeAuthFilesResponse(await apiClient.get<AuthFilesResponse>('/auth-files')),\n\n  setStatus: (name: string, disabled: boolean) =>\n    apiClient.patch<AuthFileStatusResponse>('/auth-files/status', { name, disabled }),\n\n",
         "  list: fetchAuthFilesList,\n\n  patchFile: async (payload: AuthFilePatchPayload) => {\n    const response = await apiClient.patch<AuthFileStatusResponse>('/auth-files', payload);\n    invalidateAuthFilesListCache();\n    return response;\n  },\n\n  setStatus: async (name: string, disabled: boolean) => {\n    const response = await apiClient.patch<AuthFileStatusResponse>('/auth-files/status', { name, disabled });\n    invalidateAuthFilesListCache();\n    return response;\n  },\n",
     )
-    if 'setStatusWithFallback' not in read(auth_files_path):
-        if "  patchFields: (name: string, fields: AuthFileFieldsPatch) =>\n" in read(auth_files_path):
-            replace_once(
-                auth_files_path,
-                "  patchFields: (name: string, fields: AuthFileFieldsPatch) =>\n    apiClient.patch('/auth-files/fields', { name, ...fields }),\n\n",
-                "  setStatusWithFallback: async (name: string, disabled: boolean) => {\n    try {\n      return await authFilesApi.patchFile({ name, disabled });\n    } catch {\n      return authFilesApi.setStatus(name, disabled);\n    }\n  },\n\n  patchFields: async (name: string, fields: AuthFileFieldsPatch) => {\n    const response = await apiClient.patch('/auth-files/fields', { name, ...fields });\n    invalidateAuthFilesListCache();\n    return response;\n  },\n\n",
-            )
-        else:
-            insert_once(
-                auth_files_path,
-                "  uploadFiles: async (files: File[]): Promise<AuthFileBatchUploadResult> => {\n",
-                "  setStatusWithFallback: async (name: string, disabled: boolean) => {\n    try {\n      return await authFilesApi.patchFile({ name, disabled });\n    } catch {\n      return authFilesApi.setStatus(name, disabled);\n    }\n  },\n\n  uploadFiles: async (files: File[]): Promise<AuthFileBatchUploadResult> => {\n",
-                "setStatusWithFallback",
-            )
+    replace_once(
+        auth_files_path,
+        "  patchFields: (name: string, fields: AuthFileFieldsPatch) =>\n    apiClient.patch('/auth-files/fields', { name, ...fields }),\n\n",
+        "  setStatusWithFallback: async (name: string, disabled: boolean) => {\n    try {\n      return await authFilesApi.patchFile({ name, disabled });\n    } catch {\n      return authFilesApi.setStatus(name, disabled);\n    }\n  },\n\n  patchFields: async (name: string, fields: AuthFileFieldsPatch) => {\n    const response = await apiClient.patch('/auth-files/fields', { name, ...fields });\n    invalidateAuthFilesListCache();\n    return response;\n  },\n\n",
+    )
     replace_once(
         auth_files_path,
         "    const payload = await apiClient.postForm<AuthFileBatchUploadResponse>('/auth-files', formData);\n    return normalizeBatchUploadResponse(payload, requestedNames);\n",
@@ -611,10 +490,10 @@ def patch_supporting_api_and_types(target: Path) -> None:
 
 
 def patch_locales(target: Path) -> None:
-    monitoring = json.loads(LOCALES_FILE.read_text(encoding='utf-8'))
+    monitoring = json.loads(LOCALES_FILE.read_text())
     locales_dir = target / 'src/i18n/locales'
     for locale_path in sorted(locales_dir.glob('*.json')):
-        data = json.loads(locale_path.read_text(encoding='utf-8'))
+        data = json.loads(locale_path.read_text())
         additions = monitoring.get(locale_path.name, {})
         data.setdefault('nav', {}).update(additions.get('nav', {}))
         nav_additions = additions.get('nav', {})
@@ -630,7 +509,7 @@ def patch_locales(target: Path) -> None:
         data['monitoring'] = additions.get('monitoring', data.get('monitoring', {}))
         data['usage_stats'] = additions.get('usage_stats', data.get('usage_stats', {}))
         data.setdefault('quota_management', {}).update(QUOTA_LOCALE_KEYS.get(locale_path.name, {}))
-        locale_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+        locale_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n')
 
 
 def main() -> None:

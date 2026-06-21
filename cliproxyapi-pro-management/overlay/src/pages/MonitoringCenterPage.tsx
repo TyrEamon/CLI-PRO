@@ -35,7 +35,7 @@ import { useAuthStore, useConfigStore, useNotificationStore, useQuotaStore } fro
 import type { AuthFileItem } from '@/types';
 import { maskSensitiveText } from '@/utils/format';
 import { getStatusFromError, isAntigravityFile, isClaudeFile, isCodexFile, isKimiFile } from '@/utils/quota';
-import { formatCompactNumber, formatDurationMs, formatUsd, normalizeAuthIndex, type ModelPrice } from '@/utils/proUsage';
+import { formatCompactNumber, formatDurationMs, formatUsd, normalizeAuthIndex, type ModelPrice } from '@/utils/usage';
 import {
   ANTIGRAVITY_CONFIG,
   CLAUDE_CONFIG,

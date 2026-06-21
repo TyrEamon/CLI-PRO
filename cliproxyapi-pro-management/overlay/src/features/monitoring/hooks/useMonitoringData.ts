@@ -14,7 +14,7 @@ import {
   normalizeAuthIndex,
   type ModelPrice,
   type UsageDetailWithEndpoint,
-} from '@/utils/proUsage';
+} from '@/utils/usage';
 
 const padNumber = (value: number) => String(value).padStart(2, '0');
 

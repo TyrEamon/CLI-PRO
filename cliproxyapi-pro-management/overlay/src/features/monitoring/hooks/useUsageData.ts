@@ -8,7 +8,7 @@ import {
   loadModelPricesFromSqlite,
   saveModelPricesToSqlite,
   type ModelPrice,
-} from '@/utils/proUsage';
+} from '@/utils/usage';
 
 export interface UsagePayload {
   total_requests?: number;

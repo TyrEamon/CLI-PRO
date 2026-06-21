@@ -1,7 +1,10 @@
 import i18n from '@/i18n';
 import { apiClient } from '@/services/api/client';
 import { maskApiKey } from './format';
+import { normalizeAuthIndex } from './authIndex';
 import { parseTimestampMs } from './timestamp';
+
+export { normalizeAuthIndex };
 
 export interface ModelPrice {
   prompt: number;
@@ -77,11 +80,6 @@ const toFiniteNumber = (value: unknown): number => {
   const numberValue = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(numberValue) ? numberValue : 0;
 };
-
-export function normalizeAuthIndex(value: unknown): string {
-  if (value === null || value === undefined) return '';
-  return String(value).trim();
-}
 
 const getApisRecord = (usageData: unknown): Record<string, unknown> | null => {
   const usageRecord = isRecord(usageData) ? usageData : null;
