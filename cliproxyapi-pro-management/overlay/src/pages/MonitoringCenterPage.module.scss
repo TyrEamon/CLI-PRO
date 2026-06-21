@@ -3824,15 +3824,10 @@
 
   .accountStatsFilters {
     display: grid;
-    grid-template-columns: minmax(112px, 1fr) minmax(104px, 0.9fr) minmax(96px, 0.8fr);
+    grid-template-columns: 1fr;
     gap: 8px;
-    overflow-x: auto;
+    overflow-x: visible;
     flex-wrap: nowrap;
-    scrollbar-width: none;
-  }
-
-  .accountStatsFilters::-webkit-scrollbar {
-    display: none;
   }
 
   .accountStatsSearchInput,
@@ -3859,7 +3854,8 @@
   }
 
   .accountStatsClearButton {
-    display: none;
+    display: inline-flex;
+    width: 100%;
   }
 
   .accountOverviewCardGrid {
@@ -4262,10 +4258,141 @@
   }
 
   .accountOverviewTable {
-    min-width: 920px;
+    min-width: 0;
+  }
+
+  .realtimeTableWrapper {
+    max-height: none;
+    overflow: visible;
+    padding: 0;
+    border: 0;
+    background: transparent;
   }
 
   .realtimeTable {
-    min-width: 980px;
+    min-width: 0;
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: auto;
+  }
+
+  .realtimeTable thead {
+    display: none;
+  }
+
+  .realtimeTable tbody {
+    display: grid;
+    gap: 10px;
+  }
+
+  .realtimeTable tr,
+  .realtimeTable td {
+    display: block;
+    width: 100%;
+  }
+
+  .realtimeTable tr {
+    overflow: hidden;
+    border: 1px solid var(--monitor-line);
+    border-radius: 12px;
+    background: var(--monitor-surface);
+    box-shadow: 0 8px 18px -18px rgba(45, 42, 38, 0.38);
+  }
+
+  .realtimeTable .logRowFailed {
+    border-color: color-mix(in srgb, var(--monitor-red) 30%, var(--monitor-line));
+  }
+
+  .realtimeTable tbody td,
+  .realtimeTable tbody tr:nth-child(2n) td {
+    display: grid;
+    grid-template-columns: minmax(82px, 0.36fr) minmax(0, 1fr);
+    align-items: start;
+    gap: 10px;
+    padding: 8px 12px;
+    border: 0;
+    background: transparent;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .realtimeTable tbody td:first-child {
+    position: static;
+    padding-top: 12px;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .realtimeTable tbody td:last-child {
+    padding-bottom: 12px;
+  }
+
+  .realtimeTable tbody td::before {
+    content: attr(data-label);
+    min-width: 0;
+    color: var(--monitor-muted);
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1.35;
+  }
+
+  .realtimeTable tbody td[colspan] {
+    display: block;
+  }
+
+  .realtimeTable tbody td[colspan]::before {
+    content: none;
+  }
+
+  .realtimeTable .primaryCell span,
+  .realtimeTable .primaryCell small,
+  .realtimeTable .monoCell {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .realtimeTable .recentStatusCell {
+    min-width: 0;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+}
+
+@container monitoring-page (max-width: 520px) {
+  .filterGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .toolbarHeaderActions {
+    flex-wrap: wrap;
+  }
+
+  .accountOverviewCard {
+    gap: 12px;
+    padding: 12px;
+    border-radius: 12px;
+  }
+
+  .accountTitleRow {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .accountHealthBadge {
+    justify-self: flex-start;
+  }
+
+  .accountOverviewStatusSection,
+  .accountTokenStructurePanel {
+    padding: 12px;
+  }
+
+  .healthMetricGrid,
+  .accountOverviewMetricGrid {
+    gap: 8px;
   }
 }
