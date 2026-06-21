@@ -3558,22 +3558,22 @@ export function MonitoringCenterPage() {
             <tbody>
               {realtimeLogPageRows.map((row) => (
                 <tr key={row.id} className={row.failed ? styles.logRowFailed : undefined}>
-                  <td data-label={t('monitoring.column_type')}>
+                  <td>
                     <div className={styles.primaryCell}>
                       <span>{row.provider}</span>
                       <small>{row.account || row.authLabel || row.accountMasked || '-'}</small>
                     </div>
                   </td>
-                  <td data-label={t('monitoring.column_model')}>
+                  <td>
                     <div className={styles.primaryCell}>
                       <span className={styles.monoCell}>{row.model}</span>
                       <small className={styles.monoCell}>{buildRealtimeMetaText(row)}</small>
                     </div>
                   </td>
-                  <td data-label={t('monitoring.api_key_label')}>
+                  <td>
                     <span className={styles.monoCell}>{row.clientApiKey.masked}</span>
                   </td>
-                  <td data-label={t('monitoring.recent_status')}>
+                  <td>
                     <div className={styles.recentStatusCell}>
                       <RecentPattern
                         pattern={row.recentPattern}
@@ -3586,13 +3586,12 @@ export function MonitoringCenterPage() {
                       />
                     </div>
                   </td>
-                  <td data-label={t('monitoring.request_status')}>
+                  <td>
                     <StatusBadge tone={row.failed ? 'bad' : 'good'}>
                       {row.failed ? t('monitoring.result_failed') : t('monitoring.result_success')}
                     </StatusBadge>
                   </td>
                   <td
-                    data-label={t('monitoring.column_success_rate')}
                     className={
                       row.successRate >= 0.95
                         ? styles.goodText
@@ -3603,8 +3602,8 @@ export function MonitoringCenterPage() {
                   >
                     {formatPercent(row.successRate)}
                   </td>
-                  <td data-label={t('monitoring.total_calls')}>{formatCompactNumber(row.requestCount)}</td>
-                  <td data-label={t('monitoring.column_latency')}>
+                  <td>{formatCompactNumber(row.requestCount)}</td>
+                  <td>
                     <span
                       className={
                         row.latencyMs !== null && row.latencyMs >= 30000
@@ -3617,14 +3616,14 @@ export function MonitoringCenterPage() {
                       {formatDurationMs(row.latencyMs, { locale: i18n.language })}
                     </span>
                   </td>
-                  <td data-label={t('monitoring.column_time')}>{new Date(row.timestampMs).toLocaleString(i18n.language)}</td>
-                  <td data-label={t('monitoring.this_call_usage')}>
+                  <td>{new Date(row.timestampMs).toLocaleString(i18n.language)}</td>
+                  <td>
                     <div className={styles.primaryCell}>
                       <span>{formatCompactNumber(row.totalTokens)}</span>
                       <small>{`I ${formatCompactNumber(row.inputTokens)} · O ${formatCompactNumber(row.outputTokens)} · C ${formatCompactNumber(row.cachedTokens)}`}</small>
                     </div>
                   </td>
-                  <td data-label={t('monitoring.this_call_cost')}>{hasPrices ? formatUsd(row.totalCost) : '--'}</td>
+                  <td>{hasPrices ? formatUsd(row.totalCost) : '--'}</td>
                 </tr>
               ))}
               {realtimeLogPageRows.length === 0 ? (
